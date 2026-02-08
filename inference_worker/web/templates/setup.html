@@ -1,0 +1,544 @@
+{% extends "base.html" %}
+{% block title %}Grid Inference Worker — Setup{% endblock %}
+{% block body_class %}setup-page{% endblock %}
+{% block nav %}{% endblock %}
+{% block main_class %}setup-main{% endblock %}
+
+{% block content %}
+<div class="setup-container" x-data="setupWizard()">
+
+  <!-- Header -->
+  <div class="setup-header">
+    <div class="setup-logo">
+      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+    </div>
+    <h1>Grid Inference Worker</h1>
+    <p class="setup-subtitle">Serve text models on AI Power Grid</p>
+  </div>
+
+  <!-- Step indicators -->
+  <div class="steps-bar">
+    <div class="step-dot" :class="step >= 1 ? 'active' : ''">
+      <span>1</span>
+      <label>Backend</label>
+    </div>
+    <div class="step-line" :class="step >= 2 ? 'active' : ''"></div>
+    <div class="step-dot" :class="step >= 2 ? 'active' : ''">
+      <span>2</span>
+      <label>Grid API</label>
+    </div>
+    <div class="step-line" :class="step >= 3 ? 'active' : ''"></div>
+    <div class="step-dot" :class="step >= 3 ? 'active' : ''">
+      <span>3</span>
+      <label>Launch</label>
+    </div>
+  </div>
+
+  <!-- ========== STEP 1: Backend ========== -->
+  <div class="step-panel" x-show="step === 1" x-transition>
+    <h2>Inference Backend</h2>
+    <p class="step-desc">Connect to a running inference engine, or install Ollama to get started.</p>
+
+    <!-- Auto-detection results -->
+    <div class="detect-box" :class="detecting ? 'loading' : (backends.length > 0 ? 'success' : 'idle')">
+      <template x-if="detecting">
+        <div class="detect-status">
+          <div class="spinner"></div>
+          <span>Scanning for inference engines...</span>
+        </div>
+      </template>
+
+      <template x-if="!detecting && backends.length > 0">
+        <div>
+          <div class="detect-status">
+            <div class="status-icon success">&#10003;</div>
+            <strong x-text="backends.length === 1 ? '1 backend detected' : backends.length + ' backends detected'"></strong>
+          </div>
+          <div style="margin-top: 0.65rem; display: flex; flex-direction: column; gap: 0.4rem;">
+            <template x-for="(b, i) in backends" :key="i">
+              <button type="button" class="backend-btn"
+                      :class="selected_backend === i ? 'selected' : ''"
+                      @click="selectBackend(i)">
+                <span>
+                  <strong x-text="b.name"></strong>
+                  <span style="color: var(--text-dim); margin-left: 0.35rem; font-size: 0.8rem;" x-text="b.url"></span>
+                </span>
+                <span style="display: flex; gap: 0.3rem; align-items: center;">
+                  <span class="tag" x-text="b.models.length + ' model' + (b.models.length !== 1 ? 's' : '')"></span>
+                </span>
+              </button>
+            </template>
+          </div>
+        </div>
+      </template>
+
+      <template x-if="!detecting && backends.length === 0 && detect_done">
+        <div class="detect-status">
+          <div class="status-icon warn">!</div>
+          <strong>No running inference engine detected</strong>
+        </div>
+      </template>
+    </div>
+
+    <div style="margin-bottom: 1rem;">
+      <button type="button" class="btn btn-sm btn-outline" @click="runDetect()" :disabled="detecting">Re-scan</button>
+    </div>
+
+    <!-- Backend URL + Model (shown when a backend is detected or user enters one) -->
+    <div x-show="backends.length > 0 || url_check.reachable">
+      <label class="field">
+        <span class="field-label">Backend URL</span>
+        <div class="input-with-action">
+          <input type="text" x-model="config.backend_url" placeholder="http://127.0.0.1:11434">
+          <button type="button" class="btn btn-sm btn-outline" @click="checkUrl()" :disabled="checking_url">
+            <span x-show="!checking_url">Test</span>
+            <span x-show="checking_url" class="spinner-sm"></span>
+          </button>
+        </div>
+        <div class="field-hint" x-show="url_check.reachable === true" style="color: var(--green);">
+          Connected — <span x-text="url_check.name || 'Unknown engine'"></span>
+          <span x-show="url_check.version"> v<span x-text="url_check.version"></span></span>
+        </div>
+        <div class="field-hint" x-show="url_check.reachable === false && url_check.checked" style="color: var(--red);">Not reachable</div>
+      </label>
+
+      <label class="field">
+        <span class="field-label">Model</span>
+        <template x-if="available_models.length > 0">
+          <select x-model="config.model_name" @change="fetchContextLength()">
+            <option value="" disabled>Select a model...</option>
+            <template x-for="m in available_models" :key="m">
+              <option :value="m" x-text="m"></option>
+            </template>
+          </select>
+        </template>
+        <template x-if="available_models.length === 0">
+          <input type="text" x-model="config.model_name" @change="fetchContextLength()" placeholder="e.g. llama3.2:3b">
+        </template>
+      </label>
+
+      <!-- Ollama pull model -->
+      <div x-show="config.engine === 'ollama' && config.model_name && !available_models.includes(config.model_name)" style="margin-bottom: 1rem;">
+        <button type="button" class="btn btn-outline btn-sm" @click="pullModel()" :disabled="pulling_model">
+          <span x-show="!pulling_model">Pull Model from Ollama</span>
+          <span x-show="pulling_model"><span class="spinner-sm"></span> Pulling...</span>
+        </button>
+        <div class="field-hint" x-show="pull_error" style="color: var(--red); margin-top: 0.3rem;" x-text="pull_error"></div>
+        <div class="field-hint" x-show="pull_ok" style="color: var(--green); margin-top: 0.3rem;">Model pulled!</div>
+      </div>
+    </div>
+
+    <!-- No backend: two options -->
+    <div x-show="backends.length === 0 && !url_check.reachable">
+
+      <!-- Option A: Have your own endpoint -->
+      <div class="install-card">
+        <p class="install-step-label">Connect to an existing endpoint</p>
+        <p class="field-hint" style="margin-bottom: 0.65rem;">Already running Ollama, vLLM, LM Studio, SGLang, TGI, or another server?</p>
+        <label class="field" style="margin-bottom: 0;">
+          <div class="input-with-action">
+            <input type="text" x-model="config.backend_url" placeholder="http://127.0.0.1:11434">
+            <button type="button" class="btn btn-sm btn-outline" @click="checkUrl()" :disabled="checking_url">
+              <span x-show="!checking_url">Test</span>
+              <span x-show="checking_url" class="spinner-sm"></span>
+            </button>
+          </div>
+          <div class="field-hint" x-show="url_check.reachable === true" style="color: var(--green);">
+            Connected — <span x-text="url_check.name || 'Unknown engine'"></span>
+            <span x-show="url_check.version"> v<span x-text="url_check.version"></span></span>
+          </div>
+          <div class="field-hint" x-show="url_check.reachable === false && url_check.checked" style="color: var(--red);">Not reachable</div>
+        </label>
+      </div>
+
+      <div class="divider"><span>or</span></div>
+
+      <!-- Option B: Install Ollama -->
+      <div class="install-card">
+        <p class="install-step-label">Install Ollama <span class="optional">(easiest way to get started)</span></p>
+        <p class="field-hint" style="margin-bottom: 0.65rem;">Ollama lets you run LLMs locally with one command.</p>
+        {% if platform == 'windows' %}
+        <a href="https://ollama.com/download/windows" target="_blank" rel="noopener" class="btn btn-outline btn-sm">Download Ollama for Windows</a>
+        {% else %}
+        <a href="https://ollama.com/download" target="_blank" rel="noopener" class="btn btn-outline btn-sm">Download Ollama</a>
+        <p class="field-hint" style="margin-top: 0.4rem;">Or run: <code>curl -fsSL https://ollama.com/install.sh | sh</code></p>
+        {% endif %}
+        <p class="field-hint" style="margin-top: 0.4rem;">After installing, run <code>ollama serve</code> then click <strong>Re-scan</strong> above.</p>
+      </div>
+    </div>
+
+    <div class="step-actions">
+      <div></div>
+      <button class="btn btn-primary" @click="step = 2" :disabled="!config.model_name || !config.backend_url">
+        Next
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
+      </button>
+    </div>
+  </div>
+
+  <!-- ========== STEP 2: Grid API ========== -->
+  <div class="step-panel" x-show="step === 2" x-transition>
+    <h2>AI Power Grid</h2>
+    <p class="step-desc">Enter your API key to start receiving jobs. <a href="https://aipowergrid.io" target="_blank" rel="noopener">Get an API key</a></p>
+
+    <label class="field">
+      <span class="field-label">API Key</span>
+      <input type="password" x-model="config.api_key" placeholder="Your AI Power Grid API key">
+    </label>
+
+    <label class="field">
+      <span class="field-label">Worker Name</span>
+      <input type="text" x-model="config.worker_name" placeholder="Text-Inference-Worker">
+    </label>
+
+    <label class="field">
+      <span class="field-label">Grid Model Name <span class="optional">(how your model appears)</span></span>
+      <input type="text" x-model="config.grid_model_name" placeholder="">
+      <div class="field-hint" x-text="'Auto: gridbridge/' + (config.model_name || '...')"></div>
+    </label>
+
+    <label class="field">
+      <span class="field-label">Max Length <span class="optional">(tokens per response)</span></span>
+      <div style="display: flex; align-items: center; gap: 0.75rem;">
+        <input type="range" x-model="config.max_length" min="64" max="4096" step="64"
+               style="flex: 1; accent-color: var(--accent);">
+        <span style="min-width: 3.5rem; text-align: right; font-size: 0.85rem; font-family: monospace; color: var(--text);"
+              x-text="config.max_length"></span>
+      </div>
+    </label>
+
+    <label class="field">
+      <span class="field-label">Max Context Length <span class="optional">(tokens)</span></span>
+      <input type="number" x-model="config.max_context_length" placeholder="4096" min="256" max="131072">
+      <div class="field-hint" x-show="detected_context_length" x-transition>
+        Detected: <span x-text="Number(detected_context_length).toLocaleString()"></span> tokens
+      </div>
+    </label>
+
+    <!-- Wallet -->
+    <div style="margin-top: 0.5rem; padding-top: 1rem; border-top: 1px solid var(--border);">
+      <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.75rem;">
+        <span class="field-label" style="margin-bottom: 0; display: flex; align-items: center; gap: 0.4rem;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--accent);"><path d="M21 12V7H5a2 2 0 010-4h14v4"/><path d="M3 5v14a2 2 0 002 2h16v-5"/><path d="M18 12a2 2 0 100 4h4v-4h-4z"/></svg>
+          Reward Wallet <span class="optional">(Base chain)</span>
+        </span>
+        <span class="chain-badge">
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="10"/></svg>
+          Base
+        </span>
+      </div>
+
+      <!-- Not connected -->
+      <div x-show="!config.wallet_address">
+        <button type="button" class="btn-connect" @click="connectWallet()">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12V7H5a2 2 0 010-4h14v4"/><path d="M3 5v14a2 2 0 002 2h16v-5"/><path d="M18 12a2 2 0 100 4h4v-4h-4z"/></svg>
+          Connect Wallet
+        </button>
+        <p class="wallet-hint" x-show="wallet_hint" x-text="wallet_hint"></p>
+      </div>
+
+      <!-- Connected -->
+      <div x-show="config.wallet_address" x-cloak>
+        <div class="wallet-connected">
+          <div class="address-pill" :class="walletValid ? 'valid' : 'invalid'">
+            <span class="status-dot"></span>
+            <span class="address-text" x-text="(config.wallet_address || '').slice(0,6) + '...' + (config.wallet_address || '').slice(-4)"></span>
+          </div>
+          <button type="button" class="btn-clear" @click="config.wallet_address = ''">Clear</button>
+        </div>
+      </div>
+
+      <div class="wallet-divider">or paste address</div>
+      <input type="text" x-model="config.wallet_address" placeholder="0x..." spellcheck="false" autocomplete="off">
+    </div>
+
+    <div class="step-actions">
+      <button class="btn btn-outline" @click="step = 1">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 18l-6-6 6-6"/></svg>
+        Back
+      </button>
+      <button class="btn btn-primary" @click="step = 3" :disabled="!config.api_key">
+        Next
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
+      </button>
+    </div>
+  </div>
+
+  <!-- ========== STEP 3: Launch ========== -->
+  <div class="step-panel" x-show="step === 3" x-transition>
+    <h2>Ready to Launch</h2>
+    <p class="step-desc">Review your configuration and start the worker.</p>
+
+    <div class="review-table">
+      <div class="review-row">
+        <span class="review-label">Engine</span>
+        <span class="review-value" x-text="config.engine_name || config.engine || 'OpenAI-compatible'"></span>
+      </div>
+      <div class="review-row">
+        <span class="review-label">Backend URL</span>
+        <span class="review-value" x-text="config.backend_url"></span>
+      </div>
+      <div class="review-row">
+        <span class="review-label">Model</span>
+        <span class="review-value" x-text="config.model_name"></span>
+      </div>
+      <div class="review-row">
+        <span class="review-label">Worker Name</span>
+        <span class="review-value" x-text="config.worker_name || 'Text-Inference-Worker'"></span>
+      </div>
+      <div class="review-row">
+        <span class="review-label">Grid Model</span>
+        <span class="review-value" x-text="config.grid_model_name || ('gridbridge/' + config.model_name)"></span>
+      </div>
+      <div class="review-row">
+        <span class="review-label">Max Length</span>
+        <span class="review-value" x-text="(config.max_length || '512') + ' tokens'"></span>
+      </div>
+      <div class="review-row">
+        <span class="review-label">Max Context</span>
+        <span class="review-value" x-text="(config.max_context_length || '4096') + ' tokens'"></span>
+      </div>
+      <div class="review-row">
+        <span class="review-label">Wallet</span>
+        <span class="review-value" x-text="config.wallet_address ? config.wallet_address.slice(0,6) + '...' + config.wallet_address.slice(-4) : 'Not set'"></span>
+      </div>
+    </div>
+
+    <div class="step-actions">
+      <button class="btn btn-outline" @click="step = 2">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 18l-6-6 6-6"/></svg>
+        Back
+      </button>
+      <button class="btn btn-primary btn-launch" @click="completeSetup()" :disabled="launching">
+        <template x-if="!launching">
+          <span>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+            Launch Worker
+          </span>
+        </template>
+        <template x-if="launching">
+          <span><div class="spinner-sm"></div> Starting...</span>
+        </template>
+      </button>
+    </div>
+  </div>
+
+</div>
+
+<script>
+function setupWizard() {
+  return {
+    step: 1,
+    detecting: true,
+    detect_done: false,
+    backends: [],
+    selected_backend: -1,
+    ollama_binary: null,
+    config: {
+      backend_url: '',
+      engine: '',
+      engine_name: '',
+      api_type: 'openai',
+      model_name: '',
+      api_key: '',
+      worker_name: '',
+      grid_model_name: '',
+      max_length: '512',
+      max_context_length: '4096',
+      wallet_address: '',
+    },
+    available_models: [],
+    checking_url: false,
+    url_check: { reachable: null, checked: false },
+    pulling_model: false,
+    pull_error: null,
+    pull_ok: false,
+    launching: false,
+    wallet_hint: '',
+    detected_context_length: null,
+
+    async init() {
+      await this.runDetect();
+    },
+
+    get walletValid() {
+      return /^0x[0-9a-fA-F]{40}$/.test(this.config.wallet_address);
+    },
+
+    async connectWallet() {
+      this.wallet_hint = '';
+      if (!window.ethereum) {
+        this.wallet_hint = 'No wallet detected \u2014 paste your address below';
+        return;
+      }
+      try {
+        const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+        this.config.wallet_address = accounts[0];
+        try {
+          await window.ethereum.request({
+            method: 'wallet_switchEthereumChain',
+            params: [{ chainId: '0x2105' }],
+          });
+        } catch (e) {
+          if (e.code === 4902) {
+            await window.ethereum.request({
+              method: 'wallet_addEthereumChain',
+              params: [{ chainId: '0x2105', chainName: 'Base',
+                         nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
+                         rpcUrls: ['https://mainnet.base.org'],
+                         blockExplorerUrls: ['https://basescan.org'] }],
+            });
+          }
+        }
+      } catch (e) {
+        this.wallet_hint = 'Connection rejected';
+      }
+    },
+
+    async fetchContextLength() {
+      if (!this.config.backend_url || !this.config.model_name) return;
+      this.detected_context_length = null;
+      try {
+        const r = await fetch('/api/setup/context-length', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            url: this.config.backend_url,
+            engine: this.config.engine,
+            model: this.config.model_name,
+          }),
+        });
+        const d = await r.json();
+        if (d.context_length) {
+          this.detected_context_length = d.context_length;
+          this.config.max_context_length = String(d.context_length);
+        }
+      } catch (e) { /* silent fallback to manual */ }
+    },
+
+    selectBackend(i) {
+      this.selected_backend = i;
+      const b = this.backends[i];
+      this.config.backend_url = b.url;
+      this.config.engine = b.engine;
+      this.config.engine_name = b.name;
+      this.config.api_type = b.api_type;
+      this.available_models = b.models || [];
+      if (this.available_models.length > 0) {
+        this.config.model_name = this.available_models[0];
+      } else {
+        this.config.model_name = '';
+      }
+      this.url_check = { reachable: true, checked: true, name: b.name, version: b.version };
+      this.fetchContextLength();
+    },
+
+    async runDetect() {
+      this.detecting = true;
+      this.detect_done = false;
+      try {
+        const r = await fetch('/api/setup/detect', { method: 'POST' });
+        const d = await r.json();
+        this.backends = d.backends || [];
+        this.ollama_binary = d.ollama_binary;
+        this.detect_done = true;
+        if (this.backends.length > 0) {
+          this.selectBackend(0);
+        }
+      } finally {
+        this.detecting = false;
+      }
+    },
+
+    async checkUrl() {
+      this.checking_url = true;
+      this.url_check = { reachable: null, checked: false };
+      try {
+        const r = await fetch('/api/setup/check-url', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url: this.config.backend_url }),
+        });
+        const d = await r.json();
+        d.checked = true;
+        this.url_check = d;
+        if (d.reachable) {
+          this.config.engine = d.engine || '';
+          this.config.engine_name = d.name || '';
+          this.available_models = d.models || [];
+          if (this.available_models.length > 0 && !this.config.model_name) {
+            this.config.model_name = this.available_models[0];
+          }
+        }
+      } finally {
+        this.checking_url = false;
+      }
+    },
+
+    async pullModel() {
+      this.pulling_model = true;
+      this.pull_error = null;
+      this.pull_ok = false;
+      try {
+        const r = await fetch('/api/setup/pull-model', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url: this.config.backend_url, model: this.config.model_name }),
+        });
+        const d = await r.json();
+        if (d.ok) {
+          this.pull_ok = true;
+          const lr = await fetch('/api/setup/list-models', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url: this.config.backend_url, engine: this.config.engine }),
+          });
+          const ld = await lr.json();
+          this.available_models = ld.models || [];
+        } else {
+          this.pull_error = d.error;
+        }
+      } finally {
+        this.pulling_model = false;
+      }
+    },
+
+    async completeSetup() {
+      this.launching = true;
+      try {
+        const isOllama = this.config.engine === 'ollama';
+        const payload = {
+          GRID_API_KEY: this.config.api_key,
+          GRID_WORKER_NAME: this.config.worker_name || 'Text-Inference-Worker',
+          MODEL_NAME: this.config.model_name,
+          BACKEND_TYPE: isOllama ? 'ollama' : 'openai',
+        };
+
+        if (isOllama) {
+          payload.OLLAMA_URL = this.config.backend_url;
+        } else {
+          payload.OPENAI_URL = this.config.backend_url + '/v1';
+        }
+
+        if (this.config.grid_model_name) payload.GRID_MODEL_NAME = this.config.grid_model_name;
+        if (this.config.max_length) payload.GRID_MAX_LENGTH = this.config.max_length;
+        if (this.config.max_context_length) payload.GRID_MAX_CONTEXT_LENGTH = this.config.max_context_length;
+        if (this.config.wallet_address) payload.WALLET_ADDRESS = this.config.wallet_address;
+
+        const r = await fetch('/api/setup/complete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        const d = await r.json();
+        if (d.ok) {
+          window.location.href = '/';
+        }
+      } finally {
+        this.launching = false;
+      }
+    }
+  }
+}
+</script>
+{% endblock %}

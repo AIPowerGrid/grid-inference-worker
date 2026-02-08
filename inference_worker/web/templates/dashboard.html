@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+{% block title %}Grid Inference Worker — Dashboard{% endblock %}
+{% block nav_dashboard %}active{% endblock %}
+
+{% block content %}
+<div x-data="dashboard()" x-init="poll()">
+  <div class="page-header">
+    <h1>Dashboard</h1>
+  </div>
+
+  <div class="status-grid">
+    <div class="card">
+      <h3>Worker</h3>
+      <div class="status-indicator" :class="status.worker_running ? 'online' : 'offline'">
+        <span x-text="status.worker_running ? 'Running' : 'Stopped'"></span>
+      </div>
+      <template x-if="status.worker_error">
+        <p class="error" x-text="status.worker_error"></p>
+      </template>
+    </div>
+
+    <div class="card">
+      <h3>Worker Name</h3>
+      <p x-text="status.config?.worker_name || '—'"></p>
+    </div>
+
+    <div class="card">
+      <h3>Backend</h3>
+      <p x-text="(status.config?.backend_type || '—').charAt(0).toUpperCase() + (status.config?.backend_type || '').slice(1)"></p>
+      <p style="font-size: 0.78rem; color: var(--text-dim); margin-top: 0.2rem;" x-text="status.config?.ollama_url || ''"></p>
+    </div>
+
+    <div class="card">
+      <h3>Model</h3>
+      <p x-text="status.config?.model_name || 'None'"></p>
+      <p style="font-size: 0.75rem; color: var(--text-dim); margin-top: 0.15rem;" x-show="status.config?.grid_model_name" x-text="'Grid: ' + (status.config?.grid_model_name || '')"></p>
+    </div>
+
+    <div class="card">
+      <h3>Threads</h3>
+      <p x-text="status.config?.max_threads || '—'"></p>
+    </div>
+
+    <div class="card">
+      <h3>Max Tokens</h3>
+      <p x-text="status.config?.max_length || '—'"></p>
+    </div>
+
+    <div class="card">
+      <h3>Wallet</h3>
+      <template x-if="status.config?.wallet_address">
+        <span class="wallet-addr-mini">
+          <span class="dot"></span>
+          <span x-text="(status.config?.wallet_address || '').slice(0,6) + '...' + (status.config?.wallet_address || '').slice(-4)"></span>
+        </span>
+      </template>
+      <template x-if="!status.config?.wallet_address">
+        <p style="color: var(--text-dim);">Not set</p>
+      </template>
+    </div>
+  </div>
+
+  <div style="margin-top: 1.25rem; text-align: center;">
+    <button class="btn btn-outline btn-sm" @click="restart()" :disabled="restarting">
+      <span x-show="!restarting">Restart Worker</span>
+      <span x-show="restarting"><span class="spinner-sm"></span> Restarting...</span>
+    </button>
+  </div>
+</div>
+
+<script>
+function dashboard() {
+  return {
+    status: {
+      worker_running: {{ 'true' if worker_running else 'false' }},
+      worker_error: {{ ('\"' + worker_error + '\"') if worker_error else 'null' }},
+      config: null,
+    },
+    restarting: false,
+    async poll() {
+      const update = async () => {
+        try {
+          const r = await fetch('/api/status');
+          this.status = await r.json();
+        } catch (e) { /* ignore */ }
+      };
+      await update();
+      setInterval(update, 5000);
+    },
+    async restart() {
+      this.restarting = true;
+      try {
+        await fetch('/api/worker/restart', { method: 'POST' });
+        await new Promise(r => setTimeout(r, 1000));
+        await this.poll();
+      } finally {
+        this.restarting = false;
+      }
+    }
+  }
+}
+</script>
+{% endblock %}

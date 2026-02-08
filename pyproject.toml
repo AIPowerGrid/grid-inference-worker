@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "grid-inference-worker"
+version = "0.1.0"
+description = "Turn-key text inference worker for AI Power Grid (Ollama backend)"
+requires-python = ">=3.9"
+dependencies = [
+    "httpx",
+    "python-dotenv",
+    "fastapi>=0.100.0",
+    "uvicorn[standard]>=0.20.0",
+    "jinja2>=3.1.0",
+]
+
+[project.optional-dependencies]
+test = ["pytest", "pytest-asyncio", "respx"]
+
+[project.scripts]
+grid-inference-worker = "inference_worker.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["inference_worker*"]
+
+[tool.setuptools.package-data]
+inference_worker = ["web/templates/**/*.html", "web/static/**/*"]
