@@ -212,7 +212,7 @@
 
     <label class="field">
       <span class="field-label">Grid Model Name <span class="optional">(how your model appears)</span></span>
-      <input type="text" x-model="config.grid_model_name" placeholder="e.g. gridbridge/llama3.2:3b">
+      <input type="text" x-model="config.grid_model_name" placeholder="e.g. grid/llama3.2:3b">
       <div x-show="config.grid_model_name" x-transition
            style="margin-top: 0.35rem; display: flex; align-items: center; gap: 0.4rem;">
         <span style="width: 6px; height: 6px; border-radius: 50%; background: var(--green); flex-shrink: 0;"></span>
@@ -305,7 +305,7 @@
       </div>
       <div class="review-row">
         <span class="review-label">Grid Model</span>
-        <span class="review-value" x-text="config.grid_model_name || ('gridbridge/' + config.model_name)"></span>
+        <span class="review-value" x-text="config.grid_model_name || ('grid/' + config.model_name)"></span>
       </div>
       <div class="review-row">
         <span class="review-label">Max Length</span>
@@ -416,7 +416,7 @@ function setupWizard() {
 
     updateGridModelName() {
       if (this.config.model_name) {
-        this.config.grid_model_name = 'gridbridge/' + this.config.model_name;
+        this.config.grid_model_name = 'grid/' + this.config.model_name;
       }
     },
 

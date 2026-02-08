@@ -35,12 +35,12 @@ class TextWorker:
     def _build_grid_model_name(self) -> str:
         """Build the grid-advertised model name with domain prefix."""
         if Settings.BACKEND_TYPE == "ollama":
-            return f"gridbridge/{self.model_name}"
+            return f"grid/{self.model_name}"
         # For openai-compatible backends, try to derive domain
         url = Settings.OPENAI_URL.lower()
         if "openai.com" in url:
             return f"openai/{self.model_name}"
-        return f"gridbridge/{self.model_name}"
+        return f"grid/{self.model_name}"
 
     def _get_completions_url(self) -> str:
         """Get the chat completions endpoint URL."""
