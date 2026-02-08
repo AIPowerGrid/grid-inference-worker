@@ -105,7 +105,7 @@
       <label class="field">
         <span class="field-label">Model</span>
         <template x-if="available_models.length > 0">
-          <select x-model="config.model_name" @change="fetchContextLength()">
+          <select x-model="config.model_name" @change="updateGridModelName(); fetchContextLength()">
             <option value="" disabled>Select a model...</option>
             <template x-for="m in available_models" :key="m">
               <option :value="m" x-text="m"></option>
@@ -113,7 +113,7 @@
           </select>
         </template>
         <template x-if="available_models.length === 0">
-          <input type="text" x-model="config.model_name" @change="fetchContextLength()" placeholder="e.g. llama3.2:3b">
+          <input type="text" x-model="config.model_name" @change="updateGridModelName(); fetchContextLength()" placeholder="e.g. llama3.2:3b">
         </template>
       </label>
 
@@ -201,19 +201,25 @@
     <p class="step-desc">Enter your API key to start receiving jobs. <a href="https://aipowergrid.io" target="_blank" rel="noopener">Get an API key</a></p>
 
     <label class="field">
-      <span class="field-label">API Key</span>
+      <span class="field-label">Grid API Key</span>
       <input type="password" x-model="config.api_key" placeholder="Your AI Power Grid API key">
     </label>
 
     <label class="field">
-      <span class="field-label">Worker Name</span>
+      <span class="field-label">Grid Worker Name</span>
       <input type="text" x-model="config.worker_name" placeholder="Text-Inference-Worker">
     </label>
 
     <label class="field">
       <span class="field-label">Grid Model Name <span class="optional">(how your model appears)</span></span>
-      <input type="text" x-model="config.grid_model_name" placeholder="">
-      <div class="field-hint" x-text="'Auto: gridbridge/' + (config.model_name || '...')"></div>
+      <input type="text" x-model="config.grid_model_name" placeholder="e.g. gridbridge/llama3.2:3b">
+      <div x-show="config.grid_model_name" x-transition
+           style="margin-top: 0.35rem; display: flex; align-items: center; gap: 0.4rem;">
+        <span style="width: 6px; height: 6px; border-radius: 50%; background: var(--green); flex-shrink: 0;"></span>
+        <span style="font-size: 0.78rem; color: var(--green);">
+          Detected from model name
+        </span>
+      </div>
     </label>
 
     <label class="field">
@@ -408,6 +414,12 @@ function setupWizard() {
       }
     },
 
+    updateGridModelName() {
+      if (this.config.model_name) {
+        this.config.grid_model_name = 'gridbridge/' + this.config.model_name;
+      }
+    },
+
     async fetchContextLength() {
       if (!this.config.backend_url || !this.config.model_name) return;
       this.detected_context_length = null;
@@ -449,6 +461,7 @@ function setupWizard() {
         this.config.model_name = '';
       }
       this.url_check = { reachable: true, checked: true, name: b.name, version: b.version };
+      this.updateGridModelName();
       this.fetchContextLength();
     },
 
