@@ -7,3 +7,5 @@ build/
 .env
 *.log
 .venv/
+favicon.ico
+icon.icns

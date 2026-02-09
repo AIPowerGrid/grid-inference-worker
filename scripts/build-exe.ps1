@@ -1,12 +1,13 @@
 # Build grid-inference-worker.exe on Windows
-# Usage: .\build-exe.ps1              → one file (portable, slower startup: extracts to temp each run)
-#        .\build-exe.ps1 -OneDir      → folder (faster startup, no extraction)
+# Usage: scripts\build-exe.ps1              -> one file (portable, slower startup)
+#        scripts\build-exe.ps1 -OneDir      -> folder (faster startup, no extraction)
 # Output: dist\grid-inference-worker.exe  OR  dist\grid-inference-worker\grid-inference-worker.exe
 
 param([switch]$OneDir)
 
 $ErrorActionPreference = "Stop"
-Set-Location $PSScriptRoot
+$repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+Set-Location $repoRoot
 
 # Prefer venv
 if (Test-Path ".venv\Scripts\Activate.ps1") {
@@ -22,7 +23,7 @@ pip install pillow -q
 
 # Generate icons (make_icon.py). Use root favicon.ico for exe + taskbar (sharp).
 python scripts/make_icon.py
-$iconPath = Join-Path $PSScriptRoot "favicon.ico"
+$iconPath = Join-Path $repoRoot "favicon.ico"
 $iconArg = if (Test-Path $iconPath) { @("--icon", (Resolve-Path $iconPath).Path) } else { @() }
 
 $templates = "inference_worker/web/templates;inference_worker/web/templates"
@@ -33,8 +34,8 @@ $mode = if ($OneDir) { "directory (fast startup)" } else { "single file" }
 Write-Host "Building EXE ($mode)..." -ForegroundColor Cyan
 
 # Remove old output so PyInstaller doesn't hit "Access is denied" if the exe is still running.
-$exePath = Join-Path $PSScriptRoot "dist\grid-inference-worker.exe"
-$dirPath = Join-Path $PSScriptRoot "dist\grid-inference-worker"
+$exePath = Join-Path $repoRoot "dist\grid-inference-worker.exe"
+$dirPath = Join-Path $repoRoot "dist\grid-inference-worker"
 try {
   if (Test-Path $exePath) { Remove-Item $exePath -Force }
   if (Test-Path $dirPath) { Remove-Item $dirPath -Recurse -Force }

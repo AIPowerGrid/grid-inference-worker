@@ -44,7 +44,7 @@ jobs:
           PLATFORM_ARGS=""
           if [[ "$RUNNER_OS" == "Windows" ]]; then
             SEP=";"
-            PLATFORM_ARGS="--noconsole --icon favicon.ico --manifest app.manifest"
+            PLATFORM_ARGS="--noconsole --icon favicon.ico --manifest scripts/app.manifest"
           elif [[ "$RUNNER_OS" == "macOS" ]]; then
             PLATFORM_ARGS="--windowed --icon icon.icns"
           fi
