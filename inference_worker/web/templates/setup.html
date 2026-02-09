@@ -198,8 +198,13 @@
             <div class="fc-bubble fc-model" x-show="first_contact.loading || first_contact.reply">
               <div class="fc-role" x-text="config.model_name || 'Model'"></div>
               <template x-if="first_contact.loading">
-                <div class="fc-typing">
-                  <span></span><span></span><span></span>
+                <div>
+                  <div class="fc-typing">
+                    <span></span><span></span><span></span>
+                  </div>
+                  <div class="fc-loading-hint" x-show="first_contact.slow" x-transition>
+                    Model may be loading, please wait&hellip;
+                  </div>
                 </div>
               </template>
               <template x-if="!first_contact.loading && first_contact.reply">
@@ -269,7 +274,7 @@
           <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.75rem;">
             <span class="field-label" style="margin-bottom: 0; display: flex; align-items: center; gap: 0.4rem;">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--accent);"><path d="M21 12V7H5a2 2 0 010-4h14v4"/><path d="M3 5v14a2 2 0 002 2h16v-5"/><path d="M18 12a2 2 0 100 4h4v-4h-4z"/></svg>
-              Reward Wallet <span class="optional">(Base chain)</span>
+              Reward Wallet <span class="optional">(optional &middot; Base chain)</span>
             </span>
             <span class="chain-badge">
               <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="10"/></svg>
@@ -299,6 +304,7 @@
 
           <div class="wallet-divider">or paste address</div>
           <input type="text" x-model="config.wallet_address" placeholder="0x..." spellcheck="false" autocomplete="off">
+          <p class="field-hint" style="margin-top: 0.5rem; font-size: 0.78rem; color: var(--text-muted); line-height: 1.4;">If you don't specify a wallet, rewards will be donated to the AIPG Developer Incubation Fund.</p>
         </div>
       </div>
     </div>
@@ -347,7 +353,7 @@
           </div>
           <div class="review-row">
             <span class="review-label">Wallet</span>
-            <span class="review-value" x-text="config.wallet_address ? config.wallet_address.slice(0,6) + '...' + config.wallet_address.slice(-4) : 'Not set'"></span>
+            <span class="review-value" x-text="config.wallet_address ? config.wallet_address.slice(0,6) + '...' + config.wallet_address.slice(-4) : 'Not set — rewards go to AIPG Developer Incubation Fund'"></span>
           </div>
         </div>
 
@@ -444,7 +450,7 @@ function setupWizard() {
     detected_context_length: null,
     detecting_context: false,
     context_fetch_done: false,
-    first_contact: { prompt: '', reply: '', error: '', loading: false },
+    first_contact: { prompt: '', reply: '', error: '', loading: false, slow: false },
     deploy: { started: false, phase: 0, done: false, error: '' },
 
     async init() {
@@ -522,7 +528,8 @@ function setupWizard() {
     async testModel() {
       if (!this.config.backend_url || !this.config.model_name) return;
       const promptText = "First contact.";
-      this.first_contact = { prompt: promptText, reply: '', error: '', loading: true };
+      this.first_contact = { prompt: promptText, reply: '', error: '', loading: true, slow: false };
+      const slowTimer = setTimeout(() => { this.first_contact.slow = true; }, 4000);
       try {
         const r = await fetch('/api/setup/test-model', {
           method: 'POST',
@@ -545,6 +552,7 @@ function setupWizard() {
         this.first_contact.prompt = 'Hello?';
         this.first_contact.error = 'Connection failed';
       } finally {
+        clearTimeout(slowTimer);
         this.first_contact.loading = false;
       }
     },

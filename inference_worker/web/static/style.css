@@ -918,6 +918,13 @@ ul li::before { content: "\2022"; color: var(--accent); margin-right: 0.5rem; }
   30% { transform: translateY(-4px); opacity: 1; }
 }
 
+.fc-loading-hint {
+  font-size: 0.75rem;
+  color: var(--text-dim);
+  margin-top: 0.4rem;
+  font-style: italic;
+}
+
 /* === Deployment Sequence === */
 .deploy-sequence {
   display: flex;

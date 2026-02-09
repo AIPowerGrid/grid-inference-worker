@@ -91,7 +91,7 @@
       <div class="wallet-header">
         <h2>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--accent);"><path d="M21 12V7H5a2 2 0 010-4h14v4"/><path d="M3 5v14a2 2 0 002 2h16v-5"/><path d="M18 12a2 2 0 100 4h4v-4h-4z"/></svg>
-          Wallet
+          Wallet <span class="optional">(optional)</span>
         </h2>
         <span class="chain-badge">
           <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="10"/></svg>
@@ -102,7 +102,7 @@
         <!-- Not connected -->
         <template x-if="!form.WALLET_ADDRESS">
           <div>
-            <p class="field-hint" style="margin-bottom: 0.85rem;">Connect your wallet or paste an address to receive worker rewards.</p>
+            <p class="field-hint" style="margin-bottom: 0.85rem;">Connect your wallet or paste an address to receive worker rewards. If you don't specify a wallet, rewards will be donated to the AIPG Developer Incubation Fund.</p>
             <button type="button" class="btn-connect" @click="connectWallet()">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12V7H5a2 2 0 010-4h14v4"/><path d="M3 5v14a2 2 0 002 2h16v-5"/><path d="M18 12a2 2 0 100 4h4v-4h-4z"/></svg>
               Connect Wallet

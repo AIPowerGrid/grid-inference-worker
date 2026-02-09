@@ -123,19 +123,27 @@ async def api_test_model(request: Request):
         chat_url = f"{url}/v1/chat/completions"
 
     try:
+        import asyncio
         import httpx
-        async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.post(chat_url, json={
-                "model": model,
-                "messages": [{"role": "user", "content": prompt}],
-                "max_tokens": 40,
-                "temperature": 0.8,
-            })
-            if resp.status_code == 200:
-                data = resp.json()
-                reply = data["choices"][0]["message"]["content"].strip()
-                return {"ok": True, "reply": reply, "prompt": prompt}
-            return {"ok": False, "error": f"HTTP {resp.status_code}"}
+        max_retries = 5
+        retry_delay = 3  # seconds
+        async with httpx.AsyncClient(timeout=60) as client:
+            for attempt in range(max_retries):
+                resp = await client.post(chat_url, json={
+                    "model": model,
+                    "messages": [{"role": "user", "content": prompt}],
+                    "max_tokens": 40,
+                    "temperature": 0.8,
+                })
+                if resp.status_code == 200:
+                    data = resp.json()
+                    reply = data["choices"][0]["message"]["content"].strip()
+                    return {"ok": True, "reply": reply, "prompt": prompt}
+                # Retry on 400/503 — model may still be loading
+                if resp.status_code in (400, 503) and attempt < max_retries - 1:
+                    await asyncio.sleep(retry_delay)
+                    continue
+                return {"ok": False, "error": f"HTTP {resp.status_code}"}
     except Exception as e:
         return {"ok": False, "error": str(e)}
 
