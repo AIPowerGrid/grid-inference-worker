@@ -23,29 +23,33 @@ Grab the latest binary for your platform from [Releases](https://github.com/AIPo
 
 No Python or dependencies needed. Just install a backend (Ollama is easiest), run the worker, and follow the wizard.
 
-## Headless / Server
+## CLI Flags
 
-For servers, containers, or automation, run in headless mode with CLI flags or environment variables.
-
-### CLI flags
+Override config from the command line. The web dashboard is always available at `http://localhost:7861` regardless of how you start the worker.
 
 ```bash
-grid-inference-worker --headless \
+grid-inference-worker \
   --model llama3.2:3b \
   --backend-url http://127.0.0.1:11434 \
   --api-key YOUR_API_KEY \
   --worker-name my-worker
 ```
 
-Passing any flag automatically enables headless mode (no GUI).
-
-### Environment variables
-
-Copy `.env.example` to `.env` and fill in your values:
-
-```bash
-cp .env.example .env
 ```
+--model NAME            Model name (e.g. llama3.2:3b)
+--backend-url URL       Backend URL (e.g. http://127.0.0.1:11434)
+--api-key KEY           Grid API key
+--worker-name NAME      Worker name on the grid
+--port PORT             Web dashboard port (default: 7861)
+--headless              Skip the desktop control window
+--install-service       Install as a system service (auto-start on boot)
+--uninstall-service     Remove the system service
+--service-status        Check if the service is installed
+```
+
+## Environment Variables
+
+Copy `.env.example` to `.env` and fill in your values, or configure through the web setup wizard.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -57,29 +61,9 @@ cp .env.example .env
 | `OPENAI_API_KEY` | | API key for OpenAI-compatible backend |
 | `GRID_WORKER_NAME` | `Text-Inference-Worker` | Worker name on the grid |
 | `GRID_MAX_LENGTH` | `4096` | Max generation length |
-| `GRID_MAX_CONTEXT_LENGTH` | `4096` | Max context window (auto-detected in GUI mode) |
+| `GRID_MAX_CONTEXT_LENGTH` | `4096` | Max context window (auto-detected from backend) |
 | `GRID_NSFW` | `true` | Accept NSFW jobs |
 | `WALLET_ADDRESS` | | Base chain wallet for rewards |
-
-Then run:
-
-```bash
-grid-inference-worker --headless
-```
-
-### All CLI options
-
-```
---headless              Run without GUI (terminal only)
---model NAME            Model name (e.g. llama3.2:3b)
---backend-url URL       Backend URL (e.g. http://127.0.0.1:11434)
---api-key KEY           Grid API key
---worker-name NAME      Worker name on the grid
---no-setup              Fail instead of prompting for missing config
---install-service       Install as a system service (auto-start on boot)
---uninstall-service     Remove the system service
---service-status        Check if the service is installed
-```
 
 ## Run from Source
 
