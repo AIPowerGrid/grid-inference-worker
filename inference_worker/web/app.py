@@ -35,7 +35,13 @@ def setup_log_capture():
     logging.getLogger().addHandler(handler)
 
 
-WEB_DIR = Path(__file__).parent
+import sys
+
+if getattr(sys, "frozen", False):
+    # Running as PyInstaller bundle — data files are in sys._MEIPASS
+    WEB_DIR = Path(sys._MEIPASS) / "inference_worker" / "web"
+else:
+    WEB_DIR = Path(__file__).parent
 TEMPLATES_DIR = WEB_DIR / "templates"
 STATIC_DIR = WEB_DIR / "static"
 
