@@ -111,8 +111,8 @@ async def api_test_model(request: Request):
     model = body.get("model", "")
 
     prompt = (
-        "You're an AI model being configured for a decentralized network. "
-        "Sign of life."
+        "Welcome to the AI Power Grid. You are being enlisting you as a grid worker! "
+        "The grid is a network of decentralized GenAI workers that earn rewards for their work."
     )
 
     # Use OpenAI-compatible chat completions (works with Ollama too)
@@ -132,7 +132,7 @@ async def api_test_model(request: Request):
                 resp = await client.post(chat_url, json={
                     "model": model,
                     "messages": [{"role": "user", "content": prompt}],
-                    "max_tokens": 40,
+                    "max_tokens": 60,
                     "temperature": 0.8,
                 })
                 if resp.status_code == 200:

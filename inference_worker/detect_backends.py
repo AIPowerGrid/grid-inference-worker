@@ -517,6 +517,25 @@ async def get_model_context_length(url: str, engine: str = None, model_name: str
                     elif isinstance(data, dict):
                         ctx = data.get("value")
 
+            elif engine == "lmstudio":
+                # LM Studio native API: GET /api/v1/models has max_context_length per model
+                resp = await client.get(f"{url}/api/v1/models")
+                if resp.status_code == 200:
+                    data = resp.json()
+                    for m in data.get("models", []):
+                        key = m.get("key", "")
+                        if model_name and key != model_name:
+                            continue
+                        # Prefer loaded instance's context_length, else model max
+                        loaded = m.get("loaded_instances") or []
+                        if loaded and "config" in loaded[0]:
+                            ctx = loaded[0]["config"].get("context_length")
+                        if ctx is None:
+                            ctx = m.get("max_context_length")
+                        if ctx is not None:
+                            ctx = int(ctx)
+                            break
+
             else:
                 # vLLM and other OpenAI-compat — check /v1/models for max_model_len
                 resp = await client.get(f"{url}/v1/models")
