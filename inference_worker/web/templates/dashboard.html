@@ -101,7 +101,7 @@
           <span class="config-value">
             <template x-if="status.config?.wallet_address">
               <span class="wallet-addr-mini">
-                <span class="dot"></span>
+                <svg class="chain-icon" width="10" height="10" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="12" fill="#0052FF"/><path d="M8.5 5.5v13H12a6.5 6.5 0 000-13H8.5z" fill="#fff"/></svg>
                 <span x-text="(status.config?.wallet_address || '').slice(0,6) + '...' + (status.config?.wallet_address || '').slice(-4)"></span>
               </span>
             </template>

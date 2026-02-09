@@ -14,14 +14,16 @@
   </div>
 
   <div class="log-container" x-ref="logBox">
-    <template x-for="(line, i) in lines" :key="i">
-      <div class="log-line" :class="{
-        'log-error': line.includes('[ERROR]'),
-        'log-warn': line.includes('[WARNING]'),
-        'log-info': line.includes('[INFO]'),
-      }" x-text="line"></div>
-    </template>
-    <div class="log-line log-dim" x-show="lines.length === 0">No log output yet...</div>
+    <div class="log-inner">
+      <template x-for="(line, i) in lines" :key="i">
+        <div class="log-line" :class="{
+          'log-error': line.includes('[ERROR]'),
+          'log-warn': line.includes('[WARNING]'),
+          'log-info': line.includes('[INFO]'),
+        }" x-text="line"></div>
+      </template>
+      <div class="log-line log-dim" x-show="lines.length === 0">No log output yet...</div>
+    </div>
   </div>
 </div>
 

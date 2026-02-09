@@ -1,12 +1,13 @@
-import os
 import logging
-from pathlib import Path
 
 from fastapi import Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 from ..config import Settings
+from ..env_utils import ENV_PATH, read_env, write_env, reload_settings
+from ..worker import ENLISTMENT_PROMPT, strip_thinking_tags
 from ..detect_backends import (
+    DetectionResult,
     detect_backends,
     check_backend_url,
     list_models_for_backend,
@@ -18,8 +19,6 @@ from ..detect_backends import (
 from .app import app, templates, worker_state, log_buffer, start_worker, stop_worker
 
 logger = logging.getLogger(__name__)
-
-ENV_PATH = Path.cwd() / ".env"
 
 
 # ---------------------------------------------------------------------------
@@ -44,10 +43,11 @@ async def setup_guard(request: Request, call_next):
 # ---------------------------------------------------------------------------
 @app.get("/setup", response_class=HTMLResponse)
 async def setup_page(request: Request):
-    detection = detect_backends()
+    # Don't run detect_backends() here — it scans 8+ ports (3s timeout each) and blocks 30–45s.
+    # The setup page calls POST /api/setup/detect on load instead; page loads instantly.
     return templates.TemplateResponse("setup.html", {
         "request": request,
-        "detection": detection,
+        "detection": DetectionResult(),
         "platform": get_platform(),
     })
 
@@ -79,7 +79,8 @@ async def api_check_url(request: Request):
     """Probe a specific URL and identify the engine."""
     body = await request.json()
     url = body.get("url", "")
-    info = await check_backend_url(url)
+    api_key = body.get("api_key", "")
+    info = await check_backend_url(url, api_key=api_key)
     return info
 
 
@@ -104,46 +105,55 @@ async def api_pull_model(request: Request):
 
 @app.post("/api/setup/test-model")
 async def api_test_model(request: Request):
-    """Send a greeting to the model and return its response."""
-    body = await request.json()
-    url = body.get("url", Settings.OLLAMA_URL).rstrip("/")
-    engine = body.get("engine", "ollama")
-    model = body.get("model", "")
+    """Send an enlistment prompt to the model and return its response."""
+    import asyncio
+    import httpx
 
-    prompt = (
-        "Welcome to the AI Power Grid. You are being enlisting you as a grid worker! "
-        "The grid is a network of decentralized GenAI workers that earn rewards for their work."
-    )
+    req_body = await request.json()
+    url = req_body.get("url", Settings.OLLAMA_URL).rstrip("/")
+    engine = req_body.get("engine", "ollama")
+    model = req_body.get("model", "")
+    api_key = req_body.get("api_key", "")
 
-    # Use OpenAI-compatible chat completions (works with Ollama too)
+    prompt = ENLISTMENT_PROMPT.format(model=model)
+
     chat_url = f"{url}/v1/chat/completions"
+    headers = {"Content-Type": "application/json"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+    payload = {
+        "model": model,
+        "messages": [{"role": "user", "content": prompt}],
+        "max_tokens": 80,
+        "temperature": 0.8,
+    }
     if engine == "ollama":
-        chat_url = f"{url}/v1/chat/completions"
-    elif not url.endswith("/v1"):
-        chat_url = f"{url}/v1/chat/completions"
+        payload["think"] = False
 
     try:
-        import asyncio
-        import httpx
-        max_retries = 5
-        retry_delay = 3  # seconds
-        async with httpx.AsyncClient(timeout=60) as client:
-            for attempt in range(max_retries):
-                resp = await client.post(chat_url, json={
-                    "model": model,
-                    "messages": [{"role": "user", "content": prompt}],
-                    "max_tokens": 60,
-                    "temperature": 0.8,
-                })
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.post(chat_url, json=payload, headers=headers)
+            if resp.status_code == 200:
+                data = resp.json()
+                choice = data.get("choices", [{}])[0]
+                reply = (choice.get("message", {}).get("content") or "").strip()
+                reply = strip_thinking_tags(reply)
+                if choice.get("finish_reason") == "length":
+                    reply += " …"
+                return {"ok": True, "reply": reply, "prompt": prompt}
+            # One retry on 400/503 — model may still be loading
+            if resp.status_code in (400, 503):
+                await asyncio.sleep(3)
+                resp = await client.post(chat_url, json=payload, headers=headers)
                 if resp.status_code == 200:
                     data = resp.json()
-                    reply = data["choices"][0]["message"]["content"].strip()
+                    choice = data.get("choices", [{}])[0]
+                    reply = (choice.get("message", {}).get("content") or "").strip()
+                    reply = strip_thinking_tags(reply)
+                    if choice.get("finish_reason") == "length":
+                        reply += " …"
                     return {"ok": True, "reply": reply, "prompt": prompt}
-                # Retry on 400/503 — model may still be loading
-                if resp.status_code in (400, 503) and attempt < max_retries - 1:
-                    await asyncio.sleep(retry_delay)
-                    continue
-                return {"ok": False, "error": f"HTTP {resp.status_code}"}
+            return {"ok": False, "error": f"HTTP {resp.status_code}"}
     except Exception as e:
         return {"ok": False, "error": str(e)}
 
@@ -155,7 +165,8 @@ async def api_context_length(request: Request):
     url = body.get("url", Settings.OLLAMA_URL)
     engine = body.get("engine")
     model = body.get("model", "")
-    result = await get_model_context_length(url, engine, model)
+    api_key = body.get("api_key", "")
+    result = await get_model_context_length(url, engine, model, api_key=api_key)
     return result
 
 
@@ -165,7 +176,8 @@ async def api_list_models(request: Request):
     body = await request.json()
     url = body.get("url", Settings.OLLAMA_URL)
     engine = body.get("engine")
-    models = await list_models_for_backend(url, engine)
+    api_key = body.get("api_key", "")
+    models = await list_models_for_backend(url, engine, api_key=api_key)
     return {"models": models}
 
 
@@ -174,18 +186,8 @@ async def api_complete_setup(request: Request):
     """Save config and start the worker."""
     form = await request.json()
 
-    # Build .env content, preserving any existing keys
-    env_lines = _read_existing_env()
-    for key, value in form.items():
-        if value is not None and value != "":
-            env_lines[key] = value
-
-    # Write .env
-    content = "\n".join(f"{k}={v}" for k, v in env_lines.items()) + "\n"
-    ENV_PATH.write_text(content)
-
-    # Reload settings in memory
-    _reload_settings(form)
+    write_env(form)
+    reload_settings(form)
 
     worker_state["setup_complete"] = True
 
@@ -280,16 +282,8 @@ async def save_settings(request: Request):
     """Save settings to .env and update in-memory config."""
     form = await request.json()
 
-    env_lines = _read_existing_env()
-    for key, value in form.items():
-        if value is not None and value != "":
-            env_lines[key] = value
-        elif key in env_lines:
-            del env_lines[key]
-
-    content = "\n".join(f"{k}={v}" for k, v in env_lines.items()) + "\n"
-    ENV_PATH.write_text(content)
-    _reload_settings(form)
+    write_env(form, delete_empty=True)
+    reload_settings(form)
 
     logger.info(f"Settings saved to {ENV_PATH}")
     return {"ok": True, "message": "Restart worker to apply all changes."}
@@ -312,7 +306,6 @@ async def api_grid_stats():
     result = {"user": None, "worker": None, "performance": None, "text_stats": None}
 
     async with httpx.AsyncClient(timeout=10) as client:
-        # Find user (kudos, worker list)
         try:
             r = await client.get(f"{api}/v2/find_user", headers=headers)
             if r.status_code == 200:
@@ -320,7 +313,6 @@ async def api_grid_stats():
         except Exception:
             pass
 
-        # Grid performance
         try:
             r = await client.get(f"{api}/v2/status/performance")
             if r.status_code == 200:
@@ -328,7 +320,6 @@ async def api_grid_stats():
         except Exception:
             pass
 
-        # Text stats
         try:
             r = await client.get(f"{api}/v2/stats/text/totals")
             if r.status_code == 200:
@@ -336,66 +327,16 @@ async def api_grid_stats():
         except Exception:
             pass
 
-        # Find our worker by name
         if Settings.GRID_WORKER_NAME:
             try:
-                r = await client.get(
-                    f"{api}/v2/workers",
-                    headers=headers,
-                )
+                r = await client.get(f"{api}/v2/workers", headers=headers)
                 if r.status_code == 200:
                     workers = r.json()
                     for w in workers:
-                        if Settings.GRID_WORKER_NAME and \
-                           w.get("name", "").startswith(Settings.GRID_WORKER_NAME):
+                        if w.get("name", "").startswith(Settings.GRID_WORKER_NAME):
                             result["worker"] = w
                             break
             except Exception:
                 pass
 
     return result
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-def _read_existing_env() -> dict:
-    """Read existing .env into an ordered dict."""
-    env = {}
-    if ENV_PATH.exists():
-        for line in ENV_PATH.read_text().splitlines():
-            line = line.strip()
-            if line and not line.startswith("#") and "=" in line:
-                k, v = line.split("=", 1)
-                env[k.strip()] = v.strip()
-    return env
-
-
-def _reload_settings(form: dict):
-    """Update Settings class attributes from form data."""
-    if "GRID_API_KEY" in form:
-        Settings.GRID_API_KEY = form["GRID_API_KEY"]
-    if "GRID_WORKER_NAME" in form:
-        Settings.GRID_WORKER_NAME = form["GRID_WORKER_NAME"]
-    if "BACKEND_TYPE" in form:
-        Settings.BACKEND_TYPE = form["BACKEND_TYPE"]
-    if "OLLAMA_URL" in form:
-        Settings.OLLAMA_URL = form["OLLAMA_URL"]
-    if "OPENAI_URL" in form:
-        Settings.OPENAI_URL = form["OPENAI_URL"]
-    if "OPENAI_API_KEY" in form:
-        Settings.OPENAI_API_KEY = form["OPENAI_API_KEY"]
-    if "MODEL_NAME" in form:
-        Settings.MODEL_NAME = form["MODEL_NAME"]
-    if "GRID_MODEL_NAME" in form:
-        Settings.GRID_MODEL_NAME = form["GRID_MODEL_NAME"]
-    if "GRID_NSFW" in form:
-        Settings.NSFW = form["GRID_NSFW"].lower() == "true"
-    if "GRID_MAX_THREADS" in form:
-        Settings.MAX_THREADS = int(form["GRID_MAX_THREADS"])
-    if "GRID_MAX_LENGTH" in form:
-        Settings.MAX_LENGTH = int(form["GRID_MAX_LENGTH"])
-    if "GRID_MAX_CONTEXT_LENGTH" in form:
-        Settings.MAX_CONTEXT_LENGTH = int(form["GRID_MAX_CONTEXT_LENGTH"])
-    if "WALLET_ADDRESS" in form:
-        Settings.WALLET_ADDRESS = form["WALLET_ADDRESS"]

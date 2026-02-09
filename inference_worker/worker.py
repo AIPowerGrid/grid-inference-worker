@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import re
 import time
 from collections import deque
 
@@ -23,6 +24,13 @@ AIPG_CONTEXT = """AI Power Grid (AIPG) is a distributed network for AI workloads
 - Meet founder: https://calendly.com/half-aipowergrid/30min"""
 
 AIPG_TERMS = ["aipg", "ai power grid", "aipowergrid"]
+
+ENLISTMENT_PROMPT = (
+    "You are {model}, an AI model being enlisted for service on AI Power Grid — "
+    "a decentralized network where AI workers serve real user requests and earn rewards. "
+    "This is your enlistment. Report for duty in 2-3 sentences. "
+    "State your name, what you're good at, and that you're ready to serve. Show some personality."
+)
 
 
 class WorkerStats:
@@ -118,6 +126,13 @@ def _trunc(s: str, maxlen: int = 15) -> str:
     return s[:maxlen-2] + ".." if len(s) > maxlen else s
 
 
+def strip_thinking_tags(text: str) -> str:
+    """Remove think-tag blocks so we never show thinking to users."""
+    if not text:
+        return text
+    return re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
+
+
 class TextWorker:
     def __init__(self):
         self.api = APIClient()
@@ -178,6 +193,10 @@ class TextWorker:
             "temperature": temperature,
             "top_p": top_p,
         }
+        if Settings.BACKEND_TYPE == "ollama":
+            openai_payload["think"] = False
+        elif Settings.REASONING_EFFORT:
+            openai_payload["reasoning_effort"] = Settings.REASONING_EFFORT
 
         if "stop_sequence" in payload:
             openai_payload["stop"] = payload["stop_sequence"]
@@ -289,7 +308,7 @@ class TextWorker:
                     data = resp.json()
                     choices = data.get("choices", [])
                     if choices and "message" in choices[0]:
-                        text = choices[0]["message"].get("content", "")
+                        text = strip_thinking_tags(choices[0]["message"].get("content", ""))
                     break
                 elif resp.status_code == 422:
                     logger.error(f"Backend validation error. Aborting.")

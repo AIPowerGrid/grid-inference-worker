@@ -16,6 +16,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+build = ["pillow>=9.0.0", "pyinstaller"]
 test = ["pytest", "pytest-asyncio", "respx"]
 
 [project.scripts]

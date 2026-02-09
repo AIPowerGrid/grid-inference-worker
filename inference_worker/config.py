@@ -22,6 +22,8 @@ class Settings:
     # OpenAI-compatible settings (for vllm, sglang, lmdeploy, etc.)
     OPENAI_URL = os.getenv("OPENAI_URL", "http://127.0.0.1:8000/v1")
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+    # Minimize or disable reasoning on backends that support it (e.g. "low", "none"). Leave unset to not send.
+    REASONING_EFFORT = os.getenv("REASONING_EFFORT", "").lower() or None
 
     # Model to serve (e.g. "llama3.2:3b" for ollama, "meta-llama/..." for openai)
     MODEL_NAME = os.getenv("MODEL_NAME", "")

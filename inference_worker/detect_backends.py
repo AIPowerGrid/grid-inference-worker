@@ -16,12 +16,16 @@ import logging
 import platform
 import shutil
 import subprocess
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from typing import List, Optional
 
 import httpx
 
 logger = logging.getLogger(__name__)
+
+# Shorter timeout + parallel probes so detection finishes in ~1–2s instead of 25s+
+PROBE_TIMEOUT = 1.2
 
 # ── Known engines and their default ports / probe endpoints ──────────────
 
@@ -246,40 +250,42 @@ def _identify_port_8000(client: httpx.Client, base_url: str) -> Optional[Detecte
 
 # ── Main detection ───────────────────────────────────────────────────────
 
+def _probe_one_engine(engine_def: dict) -> tuple[int, Optional[DetectedBackend]]:
+    """Probe one engine (for parallel use); returns (port, backend or None). Each call uses its own client."""
+    port = engine_def["default_port"]
+    with httpx.Client(timeout=PROBE_TIMEOUT) as client:
+        if port == 8000:
+            backend = _identify_port_8000(client, f"http://127.0.0.1:{port}")
+        else:
+            backend = _probe_single_engine(client, engine_def)
+    return (port, backend)
+
+
 def detect_backends() -> DetectionResult:
-    """Scan all known ports for running inference engines."""
+    """Scan all known ports for running inference engines (parallel + short timeout)."""
     result = DetectionResult()
 
-    # Check for Ollama binary
+    # Ollama binary check (fast, keep in main thread)
     binary = shutil.which("ollama")
     if binary:
         result.ollama_binary = binary
         try:
             out = subprocess.run(
-                ["ollama", "--version"], capture_output=True, text=True, timeout=5
+                ["ollama", "--version"], capture_output=True, text=True, timeout=2
             )
             if out.returncode == 0:
                 result.ollama_version = out.stdout.strip()
         except Exception:
             pass
 
-    seen_ports = set()
-
-    with httpx.Client(timeout=3) as client:
-        for engine_def in KNOWN_ENGINES:
-            port = engine_def["default_port"]
+    # Probe all ports in parallel so total time ~ PROBE_TIMEOUT instead of N * timeout
+    seen_ports: set[int] = set()
+    with ThreadPoolExecutor(max_workers=len(KNOWN_ENGINES)) as executor:
+        futures = {executor.submit(_probe_one_engine, eng): eng for eng in KNOWN_ENGINES}
+        for future in as_completed(futures):
+            port, backend = future.result()
             if port in seen_ports:
                 continue
-
-            # Port 8000 needs special handling (shared by multiple engines)
-            if port == 8000:
-                backend = _identify_port_8000(client, f"http://127.0.0.1:{port}")
-                if backend:
-                    result.backends.append(backend)
-                    seen_ports.add(port)
-                continue
-
-            backend = _probe_single_engine(client, engine_def)
             if backend:
                 result.backends.append(backend)
                 seen_ports.add(port)
@@ -295,14 +301,18 @@ def detect_ollama():
 
 # ── URL-specific probing (used by setup wizard "Test" button) ────────────
 
-async def check_backend_url(url: str) -> dict:
+async def check_backend_url(url: str, api_key: str = "") -> dict:
     """Probe a user-supplied URL and identify what engine is running.
-    Returns dict with: reachable, engine, models, version."""
+    Returns dict with: reachable, engine, models, version, auth_required."""
     url = url.rstrip("/")
-    info = {"reachable": False, "engine": None, "name": None, "models": [], "version": None}
+    info = {"reachable": False, "engine": None, "name": None, "models": [], "version": None, "auth_required": False}
+
+    headers = {}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
 
     try:
-        async with httpx.AsyncClient(timeout=5) as client:
+        async with httpx.AsyncClient(timeout=5, headers=headers) as client:
             # Try Ollama first
             try:
                 resp = await client.get(f"{url}/api/tags")
@@ -392,6 +402,9 @@ async def check_backend_url(url: str) -> dict:
                         info["name"] = "OpenAI-compatible"
                     info["models"] = _extract_models_openai(data)
                     return info
+                if resp.status_code in (401, 403):
+                    info["auth_required"] = True
+                    return info
             except Exception:
                 pass
 
@@ -399,7 +412,9 @@ async def check_backend_url(url: str) -> dict:
             if not info["reachable"]:
                 try:
                     resp = await client.get(url)
-                    if resp.status_code < 500:
+                    if resp.status_code in (401, 403):
+                        info["auth_required"] = True
+                    elif resp.status_code < 500:
                         info["reachable"] = True
                         info["engine"] = "unknown"
                         info["name"] = "Unknown"
@@ -412,11 +427,14 @@ async def check_backend_url(url: str) -> dict:
     return info
 
 
-async def list_models_for_backend(url: str, engine: str = None) -> list:
+async def list_models_for_backend(url: str, engine: str = None, api_key: str = "") -> list:
     """List models for any backend at the given URL."""
     url = url.rstrip("/")
+    headers = {}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
+        async with httpx.AsyncClient(timeout=10, headers=headers) as client:
             if engine == "ollama":
                 resp = await client.get(f"{url}/api/tags")
                 if resp.status_code == 200:
@@ -477,14 +495,17 @@ def install_ollama() -> dict:
         return {"ok": False, "error": str(e)}
 
 
-async def get_model_context_length(url: str, engine: str = None, model_name: str = None) -> dict:
+async def get_model_context_length(url: str, engine: str = None, model_name: str = None, api_key: str = "") -> dict:
     """Try to detect the model's context length from the backend.
     Returns {"context_length": int} or {"context_length": null}."""
     url = url.rstrip("/")
     ctx = None
+    headers = {}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
 
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
+        async with httpx.AsyncClient(timeout=10, headers=headers) as client:
             if engine == "ollama" and model_name:
                 # POST /api/show → model_info.<arch>.context_length
                 resp = await client.post(f"{url}/api/show", json={"name": model_name})

@@ -9,6 +9,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from ..config import Settings
+from ..env_utils import is_configured
 from ..worker import TextWorker
 
 logger = logging.getLogger(__name__)
@@ -55,11 +56,6 @@ worker_state = {
 }
 
 
-def _is_configured() -> bool:
-    """Check if minimum config exists to run the worker."""
-    return bool(Settings.GRID_API_KEY and Settings.MODEL_NAME)
-
-
 async def _run_worker():
     """Run the text worker loop as a background task."""
     worker = TextWorker()
@@ -100,7 +96,7 @@ async def stop_worker():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     setup_log_capture()
-    if _is_configured():
+    if is_configured():
         logger.info("Config found — starting worker.")
         worker_state["setup_complete"] = True
         await start_worker()

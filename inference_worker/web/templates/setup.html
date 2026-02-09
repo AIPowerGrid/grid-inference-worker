@@ -89,7 +89,7 @@
         <!-- Backend URL + Model -->
         <div x-show="backends.length > 0 || url_check.reachable">
           <label class="field">
-            <span class="field-label">Backend URL</span>
+            <span class="field-label">OpenAI Endpoint</span>
             <div class="input-with-action">
               <input type="text" x-model="config.backend_url" placeholder="http://127.0.0.1:11434">
               <button type="button" class="btn btn-sm btn-outline" @click="checkUrl()" :disabled="checking_url">
@@ -101,7 +101,14 @@
               Connected — <span x-text="url_check.name || 'Unknown engine'"></span>
               <span x-show="url_check.version"> v<span x-text="url_check.version"></span></span>
             </div>
-            <div class="field-hint" x-show="url_check.reachable === false && url_check.checked" style="color: var(--red);">Not reachable</div>
+            <div class="field-hint" x-show="url_check.reachable === false && !url_check.auth_required && url_check.checked" style="color: var(--red);">Not reachable</div>
+            <div class="field-hint" x-show="url_check.auth_required" style="color: var(--red);">Authentication required — enter your API key below</div>
+          </label>
+
+          <label class="field" x-show="config.backend_api_key || url_check.auth_required || config.engine === 'openai-compat'">
+            <span class="field-label">API Key <span class="optional">(optional)</span></span>
+            <input type="password" x-model="config.backend_api_key" placeholder="sk-..."
+                   :style="url_check.auth_required ? 'border-color: var(--red)' : ''">
           </label>
 
           <label class="field">
@@ -132,9 +139,13 @@
           <!-- Context Length -->
           <label class="field" x-show="config.model_name">
             <span class="field-label">Context Length</span>
-            <div style="position: relative;">
-              <input type="number" x-model="config.max_context_length" placeholder="4096" min="256" max="131072">
-              <span x-show="detecting_context" class="spinner-sm" style="position: absolute; right: 0.6rem; top: 50%; transform: translateY(-50%);"></span>
+            <div style="display: flex; align-items: center; gap: 0.75rem;">
+              <input type="range" x-model="config.max_context_length" min="256"
+                     :max="detected_context_length || 131072" step="256"
+                     style="flex: 1; accent-color: var(--accent);">
+              <span style="min-width: 4.5rem; text-align: right; font-size: 0.85rem; font-family: monospace; color: var(--text);"
+                    x-text="Number(config.max_context_length).toLocaleString()"></span>
+              <span x-show="detecting_context" class="spinner-sm"></span>
             </div>
             <div x-show="detected_context_length" x-transition
                  style="margin-top: 0.35rem; display: flex; align-items: center; gap: 0.4rem;">
@@ -149,14 +160,15 @@
           </label>
         </div>
 
-        <!-- No backend: two options -->
+        <!-- No backend detected: manual add / remote API / install Ollama -->
         <div x-show="backends.length === 0 && !url_check.reachable">
           <div class="install-card">
-            <p class="install-step-label">Connect to an existing endpoint</p>
-            <p class="field-hint" style="margin-bottom: 0.65rem;">Already running Ollama, vLLM, LM Studio, SGLang, TGI, or another server?</p>
-            <label class="field" style="margin-bottom: 0;">
+            <p class="install-step-label">Connect to OpenAI-Compatible Endpoint</p>
+            <p class="field-hint" style="margin-bottom: 0.65rem;">Any local or remote endpoint that speaks the OpenAI API — Ollama, vLLM, LM Studio, OpenAI, Together, Groq, etc.</p>
+            <label class="field">
+              <span class="field-label">OpenAI Endpoint</span>
               <div class="input-with-action">
-                <input type="text" x-model="config.backend_url" placeholder="http://127.0.0.1:11434">
+                <input type="text" x-model="config.backend_url" placeholder="http://localhost:11434 or https://api.together.xyz">
                 <button type="button" class="btn btn-sm btn-outline" @click="checkUrl()" :disabled="checking_url">
                   <span x-show="!checking_url">Test</span>
                   <span x-show="checking_url" class="spinner-sm"></span>
@@ -166,7 +178,13 @@
                 Connected — <span x-text="url_check.name || 'Unknown engine'"></span>
                 <span x-show="url_check.version"> v<span x-text="url_check.version"></span></span>
               </div>
-              <div class="field-hint" x-show="url_check.reachable === false && url_check.checked" style="color: var(--red);">Not reachable</div>
+              <div class="field-hint" x-show="url_check.reachable === false && !url_check.auth_required && url_check.checked" style="color: var(--red);">Not reachable</div>
+              <div class="field-hint" x-show="url_check.auth_required" style="color: var(--red);">Authentication required — enter your API key below</div>
+            </label>
+            <label class="field" style="margin-bottom: 0;">
+              <span class="field-label">API Key <span class="optional">(optional — for remote APIs)</span></span>
+              <input type="password" x-model="config.backend_api_key" placeholder="sk-... or key from your provider"
+                     :style="url_check.auth_required ? 'border-color: var(--red)' : ''">
             </label>
           </div>
 
@@ -186,29 +204,29 @@
         </div>
       </div>
 
-      <!-- Right column: First Contact -->
+      <!-- Right column: Enlistment -->
       <div class="step-col step-col-side" x-show="first_contact.prompt || first_contact.loading">
         <div class="first-contact" x-transition>
-          <div class="fc-label">First Contact</div>
+          <div class="fc-label">Enlistment</div>
           <div class="fc-chat">
-            <div class="fc-bubble fc-user">
-              <div class="fc-role">You</div>
-              <div class="fc-text" x-text="first_contact.prompt"></div>
-            </div>
-            <div class="fc-bubble fc-model" x-show="first_contact.loading || first_contact.reply">
-              <div class="fc-role" x-text="config.model_name || 'Model'"></div>
+            <div class="fc-bubble" :class="first_contact.reply ? 'fc-model' : 'fc-user'">
+              <div class="fc-role" x-text="first_contact.reply ? (config.model_name || 'Recruit') : 'Grid Command'"></div>
               <template x-if="first_contact.loading">
                 <div>
-                  <div class="fc-typing">
+                  <div class="fc-text" x-text="first_contact.prompt"></div>
+                  <div class="fc-typing" style="margin-top: 0.5rem;">
                     <span></span><span></span><span></span>
                   </div>
                   <div class="fc-loading-hint" x-show="first_contact.slow" x-transition>
-                    Model may be loading, please wait&hellip;
+                    Recruit is loading up, stand by&hellip;
                   </div>
                 </div>
               </template>
               <template x-if="!first_contact.loading && first_contact.reply">
                 <div class="fc-text" x-text="first_contact.reply"></div>
+              </template>
+              <template x-if="!first_contact.loading && !first_contact.reply && !first_contact.error">
+                <div class="fc-text" x-text="first_contact.prompt"></div>
               </template>
             </div>
             <div class="fc-bubble fc-error" x-show="first_contact.error">
@@ -270,41 +288,33 @@
 
       <!-- Right column: Wallet -->
       <div class="step-col step-col-side">
-        <div style="margin-bottom: 0.75rem;">
-          <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.75rem;">
-            <span class="field-label" style="margin-bottom: 0; display: flex; align-items: center; gap: 0.4rem;">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--accent);"><path d="M21 12V7H5a2 2 0 010-4h14v4"/><path d="M3 5v14a2 2 0 002 2h16v-5"/><path d="M18 12a2 2 0 100 4h4v-4h-4z"/></svg>
-              Reward Wallet <span class="optional">(optional &middot; Base chain)</span>
-            </span>
+        <div>
+          <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.65rem;">
+            <span class="field-label" style="margin-bottom: 0;">Reward Wallet</span>
             <span class="chain-badge">
-              <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="10"/></svg>
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="12" fill="#0052FF"/><path d="M8.5 5.5v13H12a6.5 6.5 0 000-13H8.5z" fill="#fff"/></svg>
               Base
             </span>
           </div>
 
           <!-- Not connected -->
           <div x-show="!config.wallet_address">
-            <button type="button" class="btn-connect" @click="connectWallet()">
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12V7H5a2 2 0 010-4h14v4"/><path d="M3 5v14a2 2 0 002 2h16v-5"/><path d="M18 12a2 2 0 100 4h4v-4h-4z"/></svg>
-              Connect Wallet
-            </button>
+            <button type="button" class="btn btn-sm btn-outline" @click="connectWallet()" style="margin-bottom: 0.5rem;">Connect Wallet</button>
             <p class="wallet-hint" x-show="wallet_hint" x-text="wallet_hint"></p>
+            <input type="text" x-model="config.wallet_address" placeholder="0x... or paste address" spellcheck="false" autocomplete="off">
+            <p class="field-hint" style="margin-top: 0.35rem;">Optional — if blank, rewards go to AIPG Dev Fund.</p>
           </div>
 
           <!-- Connected -->
           <div x-show="config.wallet_address" x-cloak>
             <div class="wallet-connected">
               <div class="address-pill" :class="walletValid ? 'valid' : 'invalid'">
-                <span class="status-dot"></span>
+                <svg class="chain-icon" width="14" height="14" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="12" fill="#0052FF"/><path d="M8.5 5.5v13H12a6.5 6.5 0 000-13H8.5z" fill="#fff"/></svg>
                 <span class="address-text" x-text="(config.wallet_address || '').slice(0,6) + '...' + (config.wallet_address || '').slice(-4)"></span>
               </div>
               <button type="button" class="btn-clear" @click="config.wallet_address = ''">Clear</button>
             </div>
           </div>
-
-          <div class="wallet-divider">or paste address</div>
-          <input type="text" x-model="config.wallet_address" placeholder="0x..." spellcheck="false" autocomplete="off">
-          <p class="field-hint" style="margin-top: 0.5rem; font-size: 0.78rem; color: var(--text-muted); line-height: 1.4;">If you don't specify a wallet, rewards will be donated to the AIPG Developer Incubation Fund.</p>
         </div>
       </div>
     </div>
@@ -433,6 +443,7 @@ function setupWizard() {
       engine_name: '',
       api_type: 'openai',
       model_name: '',
+      backend_api_key: '',
       api_key: '',
       worker_name: '',
       grid_model_name: '',
@@ -510,6 +521,7 @@ function setupWizard() {
             url: this.config.backend_url,
             engine: this.config.engine,
             model: this.config.model_name,
+            api_key: this.config.backend_api_key,
           }),
         });
         const d = await r.json();
@@ -527,7 +539,7 @@ function setupWizard() {
 
     async testModel() {
       if (!this.config.backend_url || !this.config.model_name) return;
-      const promptText = "First contact.";
+      const promptText = "Enlisting " + this.config.model_name + " for grid service...";
       this.first_contact = { prompt: promptText, reply: '', error: '', loading: true, slow: false };
       const slowTimer = setTimeout(() => { this.first_contact.slow = true; }, 4000);
       try {
@@ -538,6 +550,7 @@ function setupWizard() {
             url: this.config.backend_url,
             engine: this.config.engine,
             model: this.config.model_name,
+            api_key: this.config.backend_api_key,
           }),
         });
         const d = await r.json();
@@ -545,12 +558,10 @@ function setupWizard() {
           this.first_contact.prompt = d.prompt;
           this.first_contact.reply = d.reply;
         } else {
-          this.first_contact.prompt = 'Hello?';
-          this.first_contact.error = d.error || 'No response';
+          this.first_contact.error = d.error || 'No response from recruit';
         }
       } catch (e) {
-        this.first_contact.prompt = 'Hello?';
-        this.first_contact.error = 'Connection failed';
+        this.first_contact.error = 'Failed to reach recruit';
       } finally {
         clearTimeout(slowTimer);
         this.first_contact.loading = false;
@@ -585,6 +596,7 @@ function setupWizard() {
         if (this.config.max_length) payload.GRID_MAX_LENGTH = this.config.max_length;
         if (this.config.max_context_length) payload.GRID_MAX_CONTEXT_LENGTH = this.config.max_context_length;
         if (this.config.wallet_address) payload.WALLET_ADDRESS = this.config.wallet_address;
+        if (this.config.backend_api_key) payload.OPENAI_API_KEY = this.config.backend_api_key;
 
         // Phase 2: Connect to grid
         this.deploy.phase = 2;
@@ -652,12 +664,12 @@ function setupWizard() {
 
     async checkUrl() {
       this.checking_url = true;
-      this.url_check = { reachable: null, checked: false };
+      this.url_check = { reachable: null, checked: false, auth_required: false };
       try {
         const r = await fetch('/api/setup/check-url', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ url: this.config.backend_url }),
+          body: JSON.stringify({ url: this.config.backend_url, api_key: this.config.backend_api_key }),
         });
         const d = await r.json();
         d.checked = true;
