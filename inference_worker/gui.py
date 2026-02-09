@@ -1,9 +1,7 @@
-"""Tkinter GUI wrapper — launches web dashboard + system-tray-style window."""
+"""Tkinter GUI window — control panel for the Grid Inference Worker."""
 
-import os
 import subprocess
 import sys
-import threading
 import webbrowser
 from pathlib import Path
 
@@ -36,20 +34,9 @@ def _logo_png_path():
     return Path(__file__).resolve().parent / "web" / "static" / "logo.png"
 
 
-def run():
-    """Run with Tkinter GUI + web dashboard."""
+def run(url: str):
+    """Show the Tkinter control window. Server is already running."""
     _enable_dpi_awareness()
-
-    host = "0.0.0.0"
-    port = 7861
-    url = f"http://localhost:{port}"
-
-    def run_server():
-        import uvicorn
-        from .web.app import app
-        uvicorn.run(app, host=host, port=port, log_level="warning")
-
-    threading.Thread(target=run_server, daemon=True).start()
 
     import tkinter as tk
 

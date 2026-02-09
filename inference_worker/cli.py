@@ -1,9 +1,10 @@
-"""CLI entry point — argparse + routing to headless / GUI / service commands."""
+"""CLI entry point — starts web dashboard + optional Tkinter GUI."""
 
 import argparse
 import logging
 import os
 import sys
+import threading
 
 # With PyInstaller --noconsole, sys.stdout/stderr can be None and uvicorn's formatter fails.
 if sys.stdout is None:
@@ -31,13 +32,39 @@ def _has_display() -> bool:
     return bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
 
 
+def _apply_cli_overrides(args):
+    """Push CLI flag values into Settings before the web app reads them."""
+    from .config import Settings
+    if args.api_key:
+        Settings.GRID_API_KEY = args.api_key
+    if args.model:
+        Settings.MODEL_NAME = args.model
+        if not Settings.GRID_MODEL_NAME:
+            Settings.GRID_MODEL_NAME = f"grid/{args.model}"
+    if args.backend_url:
+        url = args.backend_url.rstrip("/")
+        try:
+            import httpx
+            r = httpx.get(f"{url}/api/version", timeout=2)
+            if r.status_code == 200:
+                Settings.BACKEND_TYPE = "ollama"
+                Settings.OLLAMA_URL = url
+            else:
+                raise Exception()
+        except Exception:
+            Settings.BACKEND_TYPE = "openai"
+            Settings.OPENAI_URL = url + "/v1"
+    if args.worker_name:
+        Settings.GRID_WORKER_NAME = args.worker_name
+
+
 def main():
     parser = argparse.ArgumentParser(
         prog="grid-inference-worker",
         description="Turn-key text inference worker for AI Power Grid",
     )
     parser.add_argument("--headless", action="store_true",
-                        help="Run without GUI (terminal only)")
+                        help="Skip the desktop GUI window")
     parser.add_argument("--model", metavar="NAME",
                         help="Model name (e.g. llama3.2:3b)")
     parser.add_argument("--backend-url", metavar="URL",
@@ -46,8 +73,8 @@ def main():
                         help="Grid API key")
     parser.add_argument("--worker-name", metavar="NAME",
                         help="Worker name on the grid")
-    parser.add_argument("--no-setup", action="store_true",
-                        help="Fail instead of prompting for missing config")
+    parser.add_argument("--port", type=int, default=7861, metavar="PORT",
+                        help="Web dashboard port (default: 7861)")
     parser.add_argument("--install-service", action="store_true",
                         help="Install as a system service (systemd/launchd/Windows startup)")
     parser.add_argument("--uninstall-service", action="store_true",
@@ -76,22 +103,35 @@ def main():
         service.uninstall(verbose=True)
         return
 
-    # Decide mode
-    use_headless = (
-        args.headless
-        or args.no_setup
-        or args.model
-        or args.api_key
-        or args.backend_url
-        or not _has_display()
-    )
+    # Apply CLI overrides
+    _apply_cli_overrides(args)
 
-    if use_headless:
-        from . import headless
-        headless.run(args)
-    else:
+    host = "0.0.0.0"
+    port = args.port
+    url = f"http://localhost:{port}"
+
+    show_gui = _has_display() and not args.headless
+
+    # Start web server in background thread
+    def run_server():
+        import uvicorn
+        from .web.app import app
+        uvicorn.run(app, host=host, port=port, log_level="warning")
+
+    server_thread = threading.Thread(target=run_server, daemon=True)
+    server_thread.start()
+
+    if show_gui:
         from . import gui
-        gui.run()
+        gui.run(url)
+    else:
+        # Headless: print URL and block until Ctrl+C
+        logger = logging.getLogger(__name__)
+        logger.info(f"Dashboard: {url}")
+        try:
+            server_thread.join()
+        except KeyboardInterrupt:
+            print("\n  Shutting down...")
 
 
 if __name__ == "__main__":
