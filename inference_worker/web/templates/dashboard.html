@@ -30,7 +30,7 @@
   <div class="stats-row" x-show="status.session_stats">
     <div class="stat-card accent">
       <div class="stat-value" x-text="formatNum(status.session_stats?.kudos_per_hour)"></div>
-      <div class="stat-label"><span class="hint" title="電 (den) — points earned for completed jobs and uptime. From Japanese 電 meaning electricity/power.">電/hr</span></div>
+      <div class="stat-label"><span class="hint" title="電 (den) — points earned for completed jobs and uptime. From Japanese 電 meaning electricity/power.">Points/hr</span></div>
     </div>
     <div class="stat-card">
       <div class="stat-value" x-text="status.session_stats?.jobs_completed ?? '—'"></div>
@@ -50,7 +50,7 @@
   <div class="stats-row" x-show="grid.worker">
     <div class="stat-card">
       <div class="stat-value" x-text="formatNum(grid.worker?.kudos_rewards)"></div>
-      <div class="stat-label"><span class="hint" title="電 (den) — points earned for completed jobs and uptime. From Japanese 電 meaning electricity/power.">電 Lifetime</span></div>
+      <div class="stat-label"><span class="hint" title="電 (den) — points earned for completed jobs and uptime. From Japanese 電 meaning electricity/power.">Points Lifetime</span></div>
     </div>
     <div class="stat-card">
       <div class="stat-value" x-text="grid.worker?.requests_fulfilled ?? '—'"></div>
@@ -162,7 +162,7 @@
         <span class="config-value" x-text="grid.user?.username || '—'"></span>
       </div>
       <div class="config-item">
-        <span class="config-label"><span class="hint" title="電 (den) — points earned for completed jobs and uptime. From Japanese 電 meaning electricity/power.">電</span></span>
+        <span class="config-label"><span class="hint" title="電 (den) — points earned for completed jobs and uptime. From Japanese 電 meaning electricity/power.">Points</span></span>
         <span class="config-value" x-text="formatNum(grid.user?.kudos)"></span>
       </div>
       <div class="config-item">
