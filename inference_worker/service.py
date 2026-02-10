@@ -87,15 +87,19 @@ def status():
     else:
         import subprocess
         if (_SYSTEMD_SYSTEM_DIR / _SYSTEMD_UNIT).exists():
-            print("  Service is installed (systemd system).")
+            print("  Service is installed (systemd).")
             subprocess.run(["systemctl", "status", _SERVICE_NAME, "--no-pager", "-l"])
         elif (_SYSTEMD_USER_DIR / _SYSTEMD_UNIT).exists():
-            print("  Service is installed (systemd user).")
+            print("  Legacy user service found. Consider reinstalling as system service.")
             subprocess.run(["systemctl", "--user", "status", _SERVICE_NAME, "--no-pager", "-l"])
 
 
 def schedule_start():
-    """Start the service after a brief delay (allows current process to release port 7861)."""
+    """Start the service after a brief delay (allows current process to release port 7861).
+
+    On Linux, the delayed start is baked into the install command (single pkexec prompt),
+    so this is only needed for Windows and macOS.
+    """
     import subprocess
     if sys.platform == "win32":
         if getattr(sys, "frozen", False):
@@ -115,11 +119,6 @@ def schedule_start():
         plist = _LAUNCHD_DIR / _LAUNCHD_PLIST
         subprocess.Popen(
             ["bash", "-c", f"sleep 2 && launchctl load '{plist}'"],
-            start_new_session=True,
-        )
-    else:
-        subprocess.Popen(
-            ["bash", "-c", f"sleep 2 && systemctl --user start {_SERVICE_NAME}"],
             start_new_session=True,
         )
 
@@ -191,6 +190,7 @@ def _win_uninstall(verbose: bool = True) -> bool:
 
 def _linux_install(verbose: bool = True, start: bool = True) -> bool:
     import subprocess
+    import tempfile
     exec_cmd = _get_exec_command()
     work_dir = str(Path(sys.executable).resolve().parent) if getattr(sys, "frozen", False) else str(Path.cwd())
 
@@ -207,56 +207,61 @@ Restart=on-failure
 RestartSec=10
 
 [Install]
-WantedBy=default.target
+WantedBy=multi-user.target
 """
-    if os.geteuid() == 0:
-        unit_path = _SYSTEMD_SYSTEM_DIR / _SYSTEMD_UNIT
-        unit_content = unit_content.replace("WantedBy=default.target", "WantedBy=multi-user.target")
-        try:
-            unit_path.write_text(unit_content)
-            subprocess.run(["systemctl", "daemon-reload"], check=True, capture_output=True)
-            subprocess.run(["systemctl", "enable", _SERVICE_NAME], check=True, capture_output=True)
-            if start:
-                subprocess.run(["systemctl", "start", _SERVICE_NAME], check=True, capture_output=True)
-            if verbose:
-                print(f"  System service installed and started.")
-                print()
-                print(f"  Commands:")
-                print(f"    sudo systemctl status {_SERVICE_NAME}")
-                print(f"    sudo systemctl stop {_SERVICE_NAME}")
-                print(f"    sudo systemctl restart {_SERVICE_NAME}")
-                print(f"    journalctl -u {_SERVICE_NAME} -f")
-                print()
-                print(f"  To remove: sudo grid-inference-worker --uninstall-service")
-            return True
-        except Exception as e:
-            if verbose:
-                print(f"  Error installing system service: {e}")
-            return False
+    unit_path = _SYSTEMD_SYSTEM_DIR / _SYSTEMD_UNIT
+
+    # Write unit to temp file, then copy with elevated privileges
+    tmp = Path(tempfile.mktemp(suffix=".service"))
+    tmp.write_text(unit_content)
+
+    cmds = (
+        f"cp '{tmp}' '{unit_path}' && "
+        f"systemctl daemon-reload && "
+        f"systemctl enable {_SERVICE_NAME}"
+    )
+    if start:
+        cmds += f" && systemctl start {_SERVICE_NAME}"
     else:
-        _SYSTEMD_USER_DIR.mkdir(parents=True, exist_ok=True)
-        unit_path = _SYSTEMD_USER_DIR / _SYSTEMD_UNIT
-        try:
-            unit_path.write_text(unit_content)
-            subprocess.run(["systemctl", "--user", "daemon-reload"], check=True, capture_output=True)
-            subprocess.run(["systemctl", "--user", "enable", _SERVICE_NAME], check=True, capture_output=True)
-            if start:
-                subprocess.run(["systemctl", "--user", "start", _SERVICE_NAME], check=True, capture_output=True)
-            if verbose:
-                print(f"  User service installed and started.")
-                print()
-                print(f"  Commands:")
-                print(f"    systemctl --user status {_SERVICE_NAME}")
-                print(f"    systemctl --user stop {_SERVICE_NAME}")
-                print(f"    systemctl --user restart {_SERVICE_NAME}")
-                print(f"    journalctl --user -u {_SERVICE_NAME} -f")
-                print()
-                print(f"  To remove: grid-inference-worker --uninstall-service")
-            return True
-        except Exception as e:
-            if verbose:
-                print(f"  Error installing user service: {e}")
-            return False
+        # Delayed start — background process waits for caller to free port 7861
+        cmds += (
+            f" && nohup bash -c 'sleep 3 && systemctl start {_SERVICE_NAME}'"
+            f" >/dev/null 2>&1 &"
+        )
+
+    try:
+        if os.geteuid() == 0:
+            subprocess.run(["bash", "-c", cmds], check=True, capture_output=True)
+        else:
+            result = subprocess.run(["pkexec", "bash", "-c", cmds], capture_output=True)
+            if result.returncode != 0:
+                tmp.unlink(missing_ok=True)
+                if verbose:
+                    print("  Authentication cancelled or pkexec failed.")
+                return False
+        tmp.unlink(missing_ok=True)
+        if verbose:
+            print(f"  System service installed.")
+            print()
+            print(f"  Commands:")
+            print(f"    sudo systemctl status {_SERVICE_NAME}")
+            print(f"    sudo systemctl stop {_SERVICE_NAME}")
+            print(f"    sudo systemctl restart {_SERVICE_NAME}")
+            print(f"    journalctl -u {_SERVICE_NAME} -f")
+            print()
+            print(f"  To remove: sudo grid-inference-worker --uninstall-service")
+        return True
+    except FileNotFoundError:
+        tmp.unlink(missing_ok=True)
+        if verbose:
+            print("  pkexec not found. Install with sudo instead:")
+            print(f"    sudo grid-inference-worker --install-service")
+        return False
+    except Exception as e:
+        tmp.unlink(missing_ok=True)
+        if verbose:
+            print(f"  Error: {e}")
+        return False
 
 
 def _linux_uninstall(verbose: bool = True) -> bool:
@@ -264,19 +269,35 @@ def _linux_uninstall(verbose: bool = True) -> bool:
 
     system_unit = _SYSTEMD_SYSTEM_DIR / _SYSTEMD_UNIT
     if system_unit.exists():
+        cmds = (
+            f"systemctl stop {_SERVICE_NAME}; "
+            f"systemctl disable {_SERVICE_NAME}; "
+            f"rm -f '{system_unit}'; "
+            f"systemctl daemon-reload"
+        )
         try:
-            subprocess.run(["systemctl", "stop", _SERVICE_NAME], capture_output=True)
-            subprocess.run(["systemctl", "disable", _SERVICE_NAME], capture_output=True)
-            system_unit.unlink()
-            subprocess.run(["systemctl", "daemon-reload"], capture_output=True)
+            if os.geteuid() == 0:
+                subprocess.run(["bash", "-c", cmds], capture_output=True)
+            else:
+                result = subprocess.run(["pkexec", "bash", "-c", cmds], capture_output=True)
+                if result.returncode != 0:
+                    if verbose:
+                        print("  Authentication cancelled or pkexec failed.")
+                    return False
             if verbose:
                 print("  System service stopped and removed.")
             return True
+        except FileNotFoundError:
+            if verbose:
+                print("  pkexec not found. Remove with sudo instead:")
+                print(f"    sudo grid-inference-worker --uninstall-service")
+            return False
         except Exception as e:
             if verbose:
                 print(f"  Error: {e}")
             return False
 
+    # Legacy: clean up old user services
     user_unit = _SYSTEMD_USER_DIR / _SYSTEMD_UNIT
     if user_unit.exists():
         try:
