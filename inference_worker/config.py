@@ -1,7 +1,35 @@
 import os
+import sys
+from pathlib import Path
 from dotenv import load_dotenv
 
-load_dotenv()
+
+def _config_dir() -> Path:
+    """Stable config directory that persists across binary updates."""
+    if getattr(sys, "frozen", False):
+        if sys.platform == "win32":
+            base = Path(os.environ.get("LOCALAPPDATA", Path.home()))
+        elif sys.platform == "darwin":
+            base = Path.home() / "Library" / "Application Support"
+        else:
+            base = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
+        d = base / "grid-inference-worker"
+        d.mkdir(parents=True, exist_ok=True)
+        # Migrate from old location (next to exe)
+        env_new = d / ".env"
+        if not env_new.exists():
+            env_old = Path(sys.executable).resolve().parent / ".env"
+            if env_old.exists():
+                import shutil
+                shutil.copy2(env_old, env_new)
+        return d
+    return Path.cwd()
+
+
+CONFIG_DIR = _config_dir()
+ENV_FILE = CONFIG_DIR / ".env"
+
+load_dotenv(ENV_FILE)
 
 
 class Settings:

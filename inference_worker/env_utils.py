@@ -1,42 +1,8 @@
 """Shared .env helpers — single source of truth for reading/writing config."""
 
-import os
-import sys
-from pathlib import Path
+from .config import Settings, CONFIG_DIR, ENV_FILE
 
-from .config import Settings
-
-
-def _config_dir() -> Path:
-    """Stable config directory that persists across binary updates.
-
-    Frozen builds use a platform-standard location:
-      Windows:  %LOCALAPPDATA%/grid-inference-worker/
-      macOS:    ~/Library/Application Support/grid-inference-worker/
-      Linux:    ~/.config/grid-inference-worker/
-    Dev installs use CWD (standard .env behavior).
-    """
-    if getattr(sys, "frozen", False):
-        if sys.platform == "win32":
-            base = Path(os.environ.get("LOCALAPPDATA", Path.home()))
-        elif sys.platform == "darwin":
-            base = Path.home() / "Library" / "Application Support"
-        else:
-            base = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
-        d = base / "grid-inference-worker"
-        d.mkdir(parents=True, exist_ok=True)
-        # Migrate: if no config here but one exists next to the exe, copy it
-        env_new = d / ".env"
-        if not env_new.exists():
-            env_old = Path(sys.executable).resolve().parent / ".env"
-            if env_old.exists():
-                import shutil
-                shutil.copy2(env_old, env_new)
-        return d
-    return Path.cwd()
-
-
-ENV_PATH = _config_dir() / ".env"
+ENV_PATH = ENV_FILE
 
 
 def read_env() -> dict:

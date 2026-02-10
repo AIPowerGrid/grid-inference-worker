@@ -113,7 +113,7 @@ def schedule_start():
                 exe, args = sys.executable, "-m inference_worker.cli --no-gui"
         subprocess.Popen(
             f'cmd /c ping -n 4 127.0.0.1 >nul 2>&1 & "{exe}" {args}',
-            creationflags=0x08000000,  # CREATE_NO_WINDOW
+            creationflags=0x08000000 | 0x00000200,  # CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP
         )
     elif sys.platform == "darwin":
         plist = _LAUNCHD_DIR / _LAUNCHD_PLIST
@@ -189,10 +189,12 @@ def _win_uninstall(verbose: bool = True) -> bool:
 # ---------------------------------------------------------------------------
 
 def _linux_install(verbose: bool = True, start: bool = True) -> bool:
+    import getpass
     import subprocess
     import tempfile
     exec_cmd = _get_exec_command()
     work_dir = str(Path(sys.executable).resolve().parent) if getattr(sys, "frozen", False) else str(Path.cwd())
+    username = getpass.getuser()
 
     unit_content = f"""[Unit]
 Description={_SERVICE_DESC}
@@ -201,6 +203,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
+User={username}
 WorkingDirectory={work_dir}
 ExecStart={exec_cmd}
 Restart=on-failure
