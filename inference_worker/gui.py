@@ -42,7 +42,7 @@ def run(url: str, ready: threading.Event = None):
 
     import tkinter as tk
 
-    root = tk.Tk()
+    root = tk.Tk(className="grid-inference-worker")
     root.title("Grid Inference Worker")
     root.resizable(False, False)
     root.minsize(320, 280)
@@ -88,16 +88,46 @@ def run(url: str, ready: threading.Event = None):
     btn_f = tk.Frame(main_f, bg="#1e293b")
     btn_f.pack(fill=tk.X)
 
+    def _update_service_label():
+        if service.is_installed():
+            svc_btn.configure(text="Remove Service")
+        else:
+            svc_btn.configure(text="Install Service")
+
     def install_service_action():
         import tkinter.messagebox as mb
         if service.is_installed():
+            ok = mb.askyesno(
+                "Remove Service",
+                "Remove the background service?\n\n"
+                "The worker will no longer start automatically on login.\n"
+                "This window stays open.",
+                parent=root,
+            )
+            if not ok:
+                return
             if service.uninstall(verbose=False):
                 mb.showinfo("Service", "Service removed.", parent=root)
             else:
                 mb.showerror("Service", "Could not remove service.", parent=root)
+            _update_service_label()
         else:
-            if service.install(verbose=False):
-                mb.showinfo("Service", "Service installed. Worker will start on boot.", parent=root)
+            ok = mb.askyesno(
+                "Install Service",
+                "Install as a background service?\n\n"
+                "\u2022 Worker runs automatically when you log in\n"
+                "\u2022 This window will close\n"
+                "\u2022 The service takes over immediately\n"
+                f"\u2022 Dashboard stays at {url}\n\n"
+                "Continue?",
+                parent=root,
+            )
+            if not ok:
+                return
+            if service.install(verbose=False, start=False):
+                service.schedule_start()
+                root.destroy()
+                sys.exit(0)
             else:
                 mb.showerror("Service", "Could not install service.", parent=root)
 
@@ -145,6 +175,10 @@ def run(url: str, ready: threading.Event = None):
             )
         b.pack(fill=tk.X, pady=4)
         btn_widgets.append((label, b))
+
+    # Set initial service button label
+    svc_btn = btn_widgets[1][1]
+    _update_service_label()
 
     # Red "Clear Config" button — only enabled if worker is configured
     from .env_utils import is_configured

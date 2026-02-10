@@ -23,14 +23,14 @@ _LAUNCHD_PLIST = f"{_LAUNCHD_LABEL}.plist"
 
 
 def _get_exec_command() -> str:
-    """Get the command to run the worker headless."""
+    """Get the command to run the worker without GUI."""
     if getattr(sys, "frozen", False):
-        return f"{sys.executable} --headless --no-setup"
+        return f"{sys.executable} --no-gui"
     import shutil
     script = shutil.which("grid-inference-worker")
     if script:
-        return f"{script} --headless --no-setup"
-    return f"{sys.executable} -m inference_worker.cli --headless --no-setup"
+        return f"{script} --no-gui"
+    return f"{sys.executable} -m inference_worker.cli --no-gui"
 
 
 # ---------------------------------------------------------------------------
@@ -49,13 +49,13 @@ def is_installed() -> bool:
         )
 
 
-def install(verbose: bool = True) -> bool:
+def install(verbose: bool = True, start: bool = True) -> bool:
     if sys.platform == "win32":
         return _win_install(verbose)
     elif sys.platform == "darwin":
-        return _macos_install(verbose)
+        return _macos_install(verbose, start)
     else:
-        return _linux_install(verbose)
+        return _linux_install(verbose, start)
 
 
 def uninstall(verbose: bool = True) -> bool:
@@ -92,6 +92,36 @@ def status():
         elif (_SYSTEMD_USER_DIR / _SYSTEMD_UNIT).exists():
             print("  Service is installed (systemd user).")
             subprocess.run(["systemctl", "--user", "status", _SERVICE_NAME, "--no-pager", "-l"])
+
+
+def schedule_start():
+    """Start the service after a brief delay (allows current process to release port 7861)."""
+    import subprocess
+    if sys.platform == "win32":
+        if getattr(sys, "frozen", False):
+            exe, args = sys.executable, "--no-gui"
+        else:
+            import shutil
+            script = shutil.which("grid-inference-worker")
+            if script:
+                exe, args = script, "--no-gui"
+            else:
+                exe, args = sys.executable, "-m inference_worker.cli --no-gui"
+        subprocess.Popen(
+            f'cmd /c ping -n 4 127.0.0.1 >nul 2>&1 & "{exe}" {args}',
+            creationflags=0x08000000,  # CREATE_NO_WINDOW
+        )
+    elif sys.platform == "darwin":
+        plist = _LAUNCHD_DIR / _LAUNCHD_PLIST
+        subprocess.Popen(
+            ["bash", "-c", f"sleep 2 && launchctl load '{plist}'"],
+            start_new_session=True,
+        )
+    else:
+        subprocess.Popen(
+            ["bash", "-c", f"sleep 2 && systemctl --user start {_SERVICE_NAME}"],
+            start_new_session=True,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -159,7 +189,7 @@ def _win_uninstall(verbose: bool = True) -> bool:
 # Linux (systemd)
 # ---------------------------------------------------------------------------
 
-def _linux_install(verbose: bool = True) -> bool:
+def _linux_install(verbose: bool = True, start: bool = True) -> bool:
     import subprocess
     exec_cmd = _get_exec_command()
     work_dir = str(Path.cwd())
@@ -186,7 +216,8 @@ WantedBy=default.target
             unit_path.write_text(unit_content)
             subprocess.run(["systemctl", "daemon-reload"], check=True, capture_output=True)
             subprocess.run(["systemctl", "enable", _SERVICE_NAME], check=True, capture_output=True)
-            subprocess.run(["systemctl", "start", _SERVICE_NAME], check=True, capture_output=True)
+            if start:
+                subprocess.run(["systemctl", "start", _SERVICE_NAME], check=True, capture_output=True)
             if verbose:
                 print(f"  System service installed and started.")
                 print()
@@ -209,7 +240,8 @@ WantedBy=default.target
             unit_path.write_text(unit_content)
             subprocess.run(["systemctl", "--user", "daemon-reload"], check=True, capture_output=True)
             subprocess.run(["systemctl", "--user", "enable", _SERVICE_NAME], check=True, capture_output=True)
-            subprocess.run(["systemctl", "--user", "start", _SERVICE_NAME], check=True, capture_output=True)
+            if start:
+                subprocess.run(["systemctl", "--user", "start", _SERVICE_NAME], check=True, capture_output=True)
             if verbose:
                 print(f"  User service installed and started.")
                 print()
@@ -269,7 +301,7 @@ def _linux_uninstall(verbose: bool = True) -> bool:
 # macOS (launchd)
 # ---------------------------------------------------------------------------
 
-def _macos_install(verbose: bool = True) -> bool:
+def _macos_install(verbose: bool = True, start: bool = True) -> bool:
     import subprocess
     exec_parts = _get_exec_command().split()
     work_dir = str(Path.cwd())
@@ -303,7 +335,8 @@ def _macos_install(verbose: bool = True) -> bool:
     plist_path = _LAUNCHD_DIR / _LAUNCHD_PLIST
     try:
         plist_path.write_text(plist_content)
-        subprocess.run(["launchctl", "load", str(plist_path)], check=True, capture_output=True)
+        if start:
+            subprocess.run(["launchctl", "load", str(plist_path)], check=True, capture_output=True)
         if verbose:
             print("  Service installed and started (launchd).")
             print()

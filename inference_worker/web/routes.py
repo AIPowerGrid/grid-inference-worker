@@ -130,21 +130,17 @@ async def api_test_model(request: Request):
     if engine == "ollama":
         payload["think"] = False
 
+    # Generous timeout — first request may trigger cold model loading (30-60s)
     try:
-        async with httpx.AsyncClient(timeout=15) as client:
-            resp = await client.post(chat_url, json=payload, headers=headers)
-            if resp.status_code == 200:
-                data = resp.json()
-                choice = data.get("choices", [{}])[0]
-                reply = (choice.get("message", {}).get("content") or "").strip()
-                reply = strip_thinking_tags(reply)
-                if choice.get("finish_reason") == "length":
-                    reply += " …"
-                return {"ok": True, "reply": reply, "prompt": prompt}
-            # One retry on 400/503 — model may still be loading
-            if resp.status_code in (400, 503):
-                await asyncio.sleep(3)
-                resp = await client.post(chat_url, json=payload, headers=headers)
+        async with httpx.AsyncClient(timeout=90) as client:
+            for attempt in range(3):
+                try:
+                    resp = await client.post(chat_url, json=payload, headers=headers)
+                except httpx.ReadTimeout:
+                    if attempt < 2:
+                        await asyncio.sleep(3)
+                        continue
+                    return {"ok": False, "error": "Model loading timed out — try again once the model is loaded"}
                 if resp.status_code == 200:
                     data = resp.json()
                     choice = data.get("choices", [{}])[0]
@@ -153,7 +149,10 @@ async def api_test_model(request: Request):
                     if choice.get("finish_reason") == "length":
                         reply += " …"
                     return {"ok": True, "reply": reply, "prompt": prompt}
-            return {"ok": False, "error": f"HTTP {resp.status_code}"}
+                if resp.status_code in (400, 503) and attempt < 2:
+                    await asyncio.sleep(5)
+                    continue
+                return {"ok": False, "error": f"HTTP {resp.status_code}"}
     except Exception as e:
         return {"ok": False, "error": str(e)}
 
