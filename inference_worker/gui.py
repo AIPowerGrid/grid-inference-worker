@@ -14,6 +14,8 @@ def _enable_dpi_awareness():
         return
     try:
         import ctypes
+        # Give the app its own taskbar identity so it shows our icon, not Python's
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("aipowergrid.grid-inference-worker")
         DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 = -4
         if hasattr(ctypes.windll.user32, "SetProcessDpiAwarenessContext"):
             ctypes.windll.user32.SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)
@@ -103,7 +105,7 @@ def run(url: str, ready: threading.Event = None):
     buttons = [
         ("Open Dashboard", lambda: webbrowser.open(url)),
         ("Install Service", install_service_action),
-        ("Restart worker", lambda: (subprocess.Popen([sys.executable] + sys.argv), root.destroy(), sys.exit(0))),
+        ("Restart worker", lambda: (subprocess.Popen(sys.argv if getattr(sys, 'frozen', False) else [sys.executable] + sys.argv), root.destroy(), sys.exit(0))),
         ("Exit", lambda: (root.destroy(), sys.exit(0))),
     ]
 
