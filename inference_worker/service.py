@@ -14,6 +14,7 @@ _WIN_APP_NAME = "GridInferenceWorker"
 # Linux: systemd unit
 _SYSTEMD_USER_DIR = Path.home() / ".config" / "systemd" / "user"
 _SYSTEMD_SYSTEM_DIR = Path("/etc/systemd/system")
+_LINUX_INSTALL_DIR = Path("/opt/grid-inference-worker")
 _SYSTEMD_UNIT = f"{_SERVICE_NAME}.service"
 
 # macOS: launchd plist
@@ -192,9 +193,18 @@ def _linux_install(verbose: bool = True, start: bool = True) -> bool:
     import getpass
     import subprocess
     import tempfile
-    exec_cmd = _get_exec_command()
-    work_dir = str(Path(sys.executable).resolve().parent) if getattr(sys, "frozen", False) else str(Path.cwd())
     username = getpass.getuser()
+
+    # For frozen binaries, copy to a stable system location so the service
+    # survives even if the user moves/deletes the original download.
+    frozen = getattr(sys, "frozen", False)
+    if frozen:
+        install_bin = _LINUX_INSTALL_DIR / "grid-inference-worker"
+        exec_cmd = f"{install_bin} --no-gui"
+        work_dir = str(_LINUX_INSTALL_DIR)
+    else:
+        exec_cmd = _get_exec_command()
+        work_dir = str(Path.cwd())
 
     unit_content = f"""[Unit]
 Description={_SERVICE_DESC}
@@ -218,7 +228,15 @@ WantedBy=multi-user.target
     tmp = Path(tempfile.mktemp(suffix=".service"))
     tmp.write_text(unit_content)
 
-    cmds = (
+    cmds = ""
+    if frozen:
+        src_bin = str(Path(sys.executable).resolve())
+        cmds += (
+            f"mkdir -p '{_LINUX_INSTALL_DIR}' && "
+            f"cp '{src_bin}' '{install_bin}' && "
+            f"chmod 755 '{install_bin}' && "
+        )
+    cmds += (
         f"cp '{tmp}' '{unit_path}' && "
         f"systemctl daemon-reload && "
         f"systemctl enable {_SERVICE_NAME}"
@@ -276,6 +294,7 @@ def _linux_uninstall(verbose: bool = True) -> bool:
             f"systemctl stop {_SERVICE_NAME}; "
             f"systemctl disable {_SERVICE_NAME}; "
             f"rm -f '{system_unit}'; "
+            f"rm -rf '{_LINUX_INSTALL_DIR}'; "
             f"systemctl daemon-reload"
         )
         try:
