@@ -192,7 +192,7 @@ def _win_uninstall(verbose: bool = True) -> bool:
 def _linux_install(verbose: bool = True, start: bool = True) -> bool:
     import subprocess
     exec_cmd = _get_exec_command()
-    work_dir = str(Path.cwd())
+    work_dir = str(Path(sys.executable).resolve().parent) if getattr(sys, "frozen", False) else str(Path.cwd())
 
     unit_content = f"""[Unit]
 Description={_SERVICE_DESC}
@@ -304,7 +304,7 @@ def _linux_uninstall(verbose: bool = True) -> bool:
 def _macos_install(verbose: bool = True, start: bool = True) -> bool:
     import subprocess
     exec_parts = _get_exec_command().split()
-    work_dir = str(Path.cwd())
+    work_dir = str(Path(sys.executable).resolve().parent) if getattr(sys, "frozen", False) else str(Path.cwd())
 
     arg_entries = "\n".join(f"      <string>{a}</string>" for a in exec_parts)
 

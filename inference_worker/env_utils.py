@@ -1,10 +1,19 @@
 """Shared .env helpers — single source of truth for reading/writing config."""
 
+import sys
 from pathlib import Path
 
 from .config import Settings
 
-ENV_PATH = Path.cwd() / ".env"
+
+def _config_dir() -> Path:
+    """Config directory — next to the exe (frozen) or CWD (dev)."""
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return Path.cwd()
+
+
+ENV_PATH = _config_dir() / ".env"
 
 
 def read_env() -> dict:

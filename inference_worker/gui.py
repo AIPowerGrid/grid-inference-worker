@@ -43,6 +43,7 @@ def run(url: str, ready: threading.Event = None):
     import tkinter as tk
 
     root = tk.Tk(className="grid-inference-worker")
+    root.tk.call("tk", "appname", "grid-inference-worker")
     root.title("Grid Inference Worker")
     root.resizable(False, False)
     root.minsize(320, 280)

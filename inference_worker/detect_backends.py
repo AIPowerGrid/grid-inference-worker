@@ -171,7 +171,7 @@ def _probe_single_engine(client: httpx.Client, engine_def: dict) -> Optional[Det
 
         # Extract models based on engine type
         if engine_id == "ollama":
-            backend.models = [m.get("name", "") for m in data.get("models", [])]
+            backend.models = [m.get("name", "").removesuffix(":latest") for m in data.get("models", [])]
         elif engine_id == "tgi":
             model_id = data.get("model_id", "")
             if model_id:
@@ -321,7 +321,7 @@ async def check_backend_url(url: str, api_key: str = "") -> dict:
                     info["reachable"] = True
                     info["engine"] = "ollama"
                     info["name"] = "Ollama"
-                    info["models"] = [m.get("name", "") for m in data.get("models", [])]
+                    info["models"] = [m.get("name", "").removesuffix(":latest") for m in data.get("models", [])]
                     try:
                         vr = await client.get(f"{url}/api/version")
                         if vr.status_code == 200:
@@ -438,7 +438,7 @@ async def list_models_for_backend(url: str, engine: str = None, api_key: str = "
             if engine == "ollama":
                 resp = await client.get(f"{url}/api/tags")
                 if resp.status_code == 200:
-                    return [m.get("name", "") for m in resp.json().get("models", [])]
+                    return [m.get("name", "").removesuffix(":latest") for m in resp.json().get("models", [])]
             elif engine == "koboldcpp":
                 resp = await client.get(f"{url}/api/v1/model")
                 if resp.status_code == 200:
