@@ -64,7 +64,9 @@ def main():
         description="Turn-key text inference worker for AI Power Grid",
     )
     parser.add_argument("--gui", action="store_true",
-                        help="Show the desktop control window (Tkinter)")
+                        help="Show the desktop control window (default for binaries)")
+    parser.add_argument("--no-gui", action="store_true",
+                        help="Skip the desktop control window (default for pip install)")
     parser.add_argument("--model", metavar="NAME",
                         help="Model name (e.g. llama3.2:3b)")
     parser.add_argument("--backend-url", metavar="URL",
@@ -135,7 +137,11 @@ def main():
 
     threading.Thread(target=wait_for_server, daemon=True).start()
 
-    if args.gui and _has_display():
+    # Binaries default to GUI, pip install defaults to console
+    frozen = getattr(sys, "frozen", False)
+    show_gui = (frozen or args.gui) and not args.no_gui and _has_display()
+
+    if show_gui:
         from . import gui
         gui.run(url, ready)
     else:
