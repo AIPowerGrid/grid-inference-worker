@@ -24,14 +24,22 @@ _LAUNCHD_PLIST = f"{_LAUNCHD_LABEL}.plist"
 
 
 def _get_exec_command() -> str:
-    """Get the command to run the worker without GUI."""
+    """Get the command to run the worker without GUI.
+
+    Uses sys.executable directly instead of pip script wrappers — the wrapper
+    .exe embeds a specific python3XX.dll path that breaks when Python is
+    updated or installed differently.  sys.executable always knows its own DLL.
+    """
     if getattr(sys, "frozen", False):
-        return f"{sys.executable} --no-gui"
-    import shutil
-    script = shutil.which("grid-inference-worker")
-    if script:
-        return f"{script} --no-gui"
-    return f"{sys.executable} -m inference_worker.cli --no-gui"
+        exe = str(Path(sys.executable).resolve())
+        args = "--no-gui"
+    else:
+        exe = sys.executable
+        args = "-m inference_worker.cli --no-gui"
+    # Quote on Windows — paths like "C:\Users\John Doe\..." need it
+    if sys.platform == "win32":
+        return f'"{exe}" {args}'
+    return f"{exe} {args}"
 
 
 # ---------------------------------------------------------------------------
@@ -104,14 +112,9 @@ def schedule_start():
     import subprocess
     if sys.platform == "win32":
         if getattr(sys, "frozen", False):
-            exe, args = sys.executable, "--no-gui"
+            exe, args = str(Path(sys.executable).resolve()), "--no-gui"
         else:
-            import shutil
-            script = shutil.which("grid-inference-worker")
-            if script:
-                exe, args = script, "--no-gui"
-            else:
-                exe, args = sys.executable, "-m inference_worker.cli --no-gui"
+            exe, args = sys.executable, "-m inference_worker.cli --no-gui"
         subprocess.Popen(
             f'cmd /c ping -n 4 127.0.0.1 >nul 2>&1 & "{exe}" {args}',
             creationflags=0x08000000 | 0x00000200,  # CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP
