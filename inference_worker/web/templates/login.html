@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Grid Inference Worker — Login</title>
+  <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <main style="display: flex; align-items: center; justify-content: center; min-height: 100vh;">
+    <div class="card" style="max-width: 380px; width: 100%; text-align: center;">
+      <h2 style="margin-bottom: 1rem;">Dashboard Token</h2>
+      <p style="color: var(--text-dim); font-size: 0.85rem; margin-bottom: 1.25rem;">
+        Enter the token shown in the worker's terminal or GUI to continue.
+      </p>
+      {% if error %}
+      <p style="color: #f87171; font-size: 0.85rem; margin-bottom: 1rem;">{{ error }}</p>
+      {% endif %}
+      <form method="POST" action="/login">
+        <input type="hidden" name="next" value="{{ next }}">
+        <input type="password" name="token" placeholder="Paste token" autofocus
+               style="width: 100%; margin-bottom: 0.75rem;">
+        <button type="submit" class="btn btn-primary" style="width: 100%;">Login</button>
+      </form>
+    </div>
+  </main>
+</body>
+</html>

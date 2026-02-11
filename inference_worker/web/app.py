@@ -4,12 +4,13 @@ from collections import deque
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from ..config import Settings
-from ..env_utils import is_configured
+from ..env_utils import is_configured, ensure_dashboard_token
 from ..worker import TextWorker
 
 logger = logging.getLogger(__name__)
@@ -96,6 +97,7 @@ async def stop_worker():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     setup_log_capture()
+    ensure_dashboard_token()
     if is_configured():
         logger.info("Config found — starting worker.")
         worker_state["setup_complete"] = True

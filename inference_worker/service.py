@@ -194,6 +194,7 @@ def _win_uninstall(verbose: bool = True) -> bool:
 
 def _linux_install(verbose: bool = True, start: bool = True) -> bool:
     import getpass
+    import shlex
     import subprocess
     import tempfile
     username = getpass.getuser()
@@ -227,22 +228,25 @@ WantedBy=multi-user.target
 """
     unit_path = _SYSTEMD_SYSTEM_DIR / _SYSTEMD_UNIT
 
-    # Write unit to temp file, then copy with elevated privileges
-    tmp = Path(tempfile.mktemp(suffix=".service"))
-    tmp.write_text(unit_content)
+    # Write unit to a secure temp file (NamedTemporaryFile avoids TOCTOU race)
+    fd = tempfile.NamedTemporaryFile(mode="w", suffix=".service", delete=False)
+    fd.write(unit_content)
+    fd.close()
+    tmp = Path(fd.name)
 
+    # Use shlex.quote on all runtime-derived paths to prevent shell injection
     cmds = ""
     if frozen:
         src_bin = str(Path(sys.executable).resolve())
         cmds += (
-            f"mkdir -p '{_LINUX_INSTALL_DIR}' && "
-            f"cp '{src_bin}' '{install_bin}' && "
-            f"chmod 755 '{install_bin}' && "
+            f"mkdir -p {shlex.quote(str(_LINUX_INSTALL_DIR))} && "
+            f"cp {shlex.quote(src_bin)} {shlex.quote(str(install_bin))} && "
+            f"chmod 755 {shlex.quote(str(install_bin))} && "
         )
     cmds += (
-        f"cp '{tmp}' '{unit_path}' && "
+        f"cp {shlex.quote(str(tmp))} {shlex.quote(str(unit_path))} && "
         f"systemctl daemon-reload && "
-        f"systemctl enable {_SERVICE_NAME}"
+        f"systemctl enable {shlex.quote(_SERVICE_NAME)}"
     )
     if start:
         cmds += f" && systemctl start {_SERVICE_NAME}"

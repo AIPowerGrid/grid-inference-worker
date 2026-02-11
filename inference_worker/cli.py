@@ -112,6 +112,11 @@ def main():
     port = args.port
     url = f"http://localhost:{port}"
 
+    # Ensure dashboard auth token exists before the server starts
+    from .env_utils import ensure_dashboard_token
+    token = ensure_dashboard_token()
+    auth_url = f"{url}?token={token}"
+
     # Start web server in background thread
     def run_server():
         import uvicorn
@@ -128,7 +133,7 @@ def main():
         import urllib.request
         for _ in range(60):
             try:
-                urllib.request.urlopen(url, timeout=1)
+                urllib.request.urlopen(f"{url}/login", timeout=1)
                 ready.set()
                 return
             except Exception:
@@ -143,14 +148,14 @@ def main():
 
     if show_gui:
         from . import gui
-        gui.run(url, ready)
+        gui.run(url, auth_url, ready)
     else:
         # Console mode: wait for ready, print URL, auto-open browser
         logger = logging.getLogger(__name__)
         ready.wait(timeout=30)
-        logger.info(f"Dashboard: {url}")
+        logger.info(f"Dashboard: {auth_url}")
         if _has_display():
-            webbrowser.open(url)
+            webbrowser.open(auth_url)
         try:
             server_thread.join()
         except KeyboardInterrupt:

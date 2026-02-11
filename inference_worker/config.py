@@ -62,6 +62,9 @@ class Settings:
     # Wallet address for rewards (Base chain)
     WALLET_ADDRESS = os.getenv("WALLET_ADDRESS", "")
 
+    # Dashboard auth token (auto-generated on first run)
+    DASHBOARD_TOKEN = os.getenv("DASHBOARD_TOKEN", "")
+
     @classmethod
     def validate(cls):
         if not cls.GRID_API_KEY:

@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from typing import List, Any, Dict, Optional
 
@@ -47,19 +48,28 @@ class APIClient:
             raise
 
     async def submit_result(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        """Submit a completed text generation result."""
-        logger.debug(f"Submitting result for job {payload.get('id')}")
-        response = await self.client.post(
-            "/v2/generate/text/submit", headers=self.headers, json=payload
-        )
-        if response.status_code == 200:
-            resp_data = response.json()
-            reward = resp_data.get("reward", 0)
-            logger.debug(f"Submit OK — {reward} 電")
-            return resp_data
-        else:
-            logger.error(f"Submit error [{response.status_code}]: {response.text}")
-            response.raise_for_status()
+        """Submit a completed text generation result (retries on transient errors)."""
+        job_id = payload.get("id", "?")
+        for attempt in range(3):
+            try:
+                logger.debug(f"Submitting result for job {job_id} (attempt {attempt + 1}/3)")
+                response = await self.client.post(
+                    "/v2/generate/text/submit", headers=self.headers, json=payload
+                )
+                if response.status_code == 200:
+                    resp_data = response.json()
+                    reward = resp_data.get("reward", 0)
+                    logger.debug(f"Submit OK — {reward} 電")
+                    return resp_data
+                else:
+                    logger.error(f"Submit error [{response.status_code}]: {response.text[:200]}")
+                    response.raise_for_status()
+            except (httpx.ConnectError, httpx.ReadTimeout, httpx.WriteTimeout) as e:
+                if attempt < 2:
+                    logger.warning(f"Submit retry for {job_id}: {e}")
+                    await asyncio.sleep(3 * (attempt + 1))
+                    continue
+                raise
 
     async def find_user(self) -> Optional[Dict[str, Any]]:
         """Look up the current user from the API key."""

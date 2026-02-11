@@ -1,5 +1,8 @@
 """Shared .env helpers — single source of truth for reading/writing config."""
 
+import os
+import sys
+
 from .config import Settings, CONFIG_DIR, ENV_FILE
 
 ENV_PATH = ENV_FILE
@@ -29,7 +32,12 @@ def write_env(config: dict, *, delete_empty: bool = False):
             env[k] = str(v)
         elif delete_empty and k in env:
             del env[k]
-    ENV_PATH.write_text("\n".join(f"{k}={v}" for k, v in env.items()) + "\n")
+    # Strip newlines from values to prevent .env injection
+    content = "\n".join(f"{k}={v.replace(chr(10), '').replace(chr(13), '')}" for k, v in env.items()) + "\n"
+    ENV_PATH.write_text(content)
+    # Restrict permissions on Unix — file contains API keys
+    if sys.platform != "win32":
+        os.chmod(ENV_PATH, 0o600)
 
 
 def reload_settings(config: dict):
@@ -62,3 +70,14 @@ def reload_settings(config: dict):
 def is_configured() -> bool:
     """Check if minimum config exists to run the worker."""
     return bool(Settings.GRID_API_KEY and Settings.MODEL_NAME)
+
+
+def ensure_dashboard_token() -> str:
+    """Create a random dashboard auth token if one doesn't exist yet."""
+    if Settings.DASHBOARD_TOKEN:
+        return Settings.DASHBOARD_TOKEN
+    import secrets
+    token = secrets.token_urlsafe(32)
+    write_env({"DASHBOARD_TOKEN": token})
+    Settings.DASHBOARD_TOKEN = token
+    return token

@@ -1,7 +1,8 @@
 import logging
+import urllib.parse
 
 from fastapi import Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from ..config import Settings
 from ..env_utils import ENV_PATH, read_env, write_env, reload_settings
@@ -20,6 +21,8 @@ from .app import app, templates, worker_state, log_buffer, start_worker, stop_wo
 
 logger = logging.getLogger(__name__)
 
+_AUTH_EXEMPT = ("/static", "/login", "/favicon.ico")
+
 
 # ---------------------------------------------------------------------------
 # Middleware: redirect to setup if not configured
@@ -31,11 +34,76 @@ async def setup_guard(request: Request, call_next):
         path.startswith("/static")
         or path.startswith("/api/")
         or path.startswith("/setup")
+        or path == "/login"
     ):
         return await call_next(request)
     if not worker_state["setup_complete"]:
         return RedirectResponse("/setup", status_code=303)
     return await call_next(request)
+
+
+# ---------------------------------------------------------------------------
+# Middleware: dashboard auth token
+# ---------------------------------------------------------------------------
+@app.middleware("http")
+async def auth_guard(request: Request, call_next):
+    path = request.url.path
+
+    # Always allow static assets and the login page
+    if any(path.startswith(p) or path == p for p in _AUTH_EXEMPT):
+        return await call_next(request)
+
+    token = Settings.DASHBOARD_TOKEN
+    if not token:
+        # No token configured (shouldn't happen, but don't lock users out)
+        return await call_next(request)
+
+    # 1. Check cookie
+    if request.cookies.get("_token") == token:
+        return await call_next(request)
+
+    # 2. Check Bearer header (for API clients)
+    auth_header = request.headers.get("authorization", "")
+    if auth_header.startswith("Bearer ") and auth_header[7:] == token:
+        return await call_next(request)
+
+    # 3. Check ?token= query param (sets cookie for future requests)
+    if request.query_params.get("token") == token:
+        response = await call_next(request)
+        response.set_cookie(
+            "_token", token, httponly=True, samesite="lax", max_age=86400 * 365,
+        )
+        return response
+
+    # Unauthorized
+    if path.startswith("/api/"):
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    return RedirectResponse(f"/login?next={urllib.parse.quote(path)}")
+
+
+# ---------------------------------------------------------------------------
+# Login
+# ---------------------------------------------------------------------------
+@app.get("/login", response_class=HTMLResponse)
+async def login_page(request: Request):
+    next_url = request.query_params.get("next", "/")
+    return templates.TemplateResponse("login.html", {"request": request, "next": next_url})
+
+
+@app.post("/login")
+async def login_submit(request: Request):
+    form = await request.form()
+    token = form.get("token", "")
+    next_url = form.get("next", "/")
+    if token == Settings.DASHBOARD_TOKEN:
+        response = RedirectResponse(next_url, status_code=303)
+        response.set_cookie(
+            "_token", token, httponly=True, samesite="lax", max_age=86400 * 365,
+        )
+        return response
+    return templates.TemplateResponse("login.html", {
+        "request": request, "next": next_url, "error": "Invalid token",
+    })
 
 
 # ---------------------------------------------------------------------------
@@ -55,7 +123,8 @@ async def setup_page(request: Request):
 @app.post("/api/setup/detect")
 async def api_detect():
     """Scan all known ports for running inference engines."""
-    detection = detect_backends()
+    import asyncio
+    detection = await asyncio.to_thread(detect_backends)
     return {
         "found": detection.found,
         "ollama_binary": detection.ollama_binary,
@@ -87,7 +156,8 @@ async def api_check_url(request: Request):
 @app.post("/api/setup/install-ollama")
 async def api_install_ollama():
     """Install Ollama using the official install script."""
-    result = install_ollama()
+    import asyncio
+    result = await asyncio.to_thread(install_ollama)
     return result
 
 

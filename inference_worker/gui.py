@@ -36,7 +36,7 @@ def _logo_png_path():
     return Path(__file__).resolve().parent / "web" / "static" / "logo.png"
 
 
-def run(url: str, ready: threading.Event = None):
+def run(url: str, auth_url: str = None, ready: threading.Event = None):
     """Show the Tkinter control window. Server is already running."""
     _enable_dpi_awareness()
 
@@ -157,7 +157,7 @@ def run(url: str, ready: threading.Event = None):
                 mb.showerror("Clear Config", f"Could not clear config: {e}", parent=root)
 
     buttons = [
-        ("Open Dashboard", lambda: webbrowser.open(url)),
+        ("Open Dashboard", lambda: webbrowser.open(auth_url or url)),
         ("Install Service", install_service_action),
         ("Exit", lambda: (root.destroy(), sys.exit(0))),
     ]
