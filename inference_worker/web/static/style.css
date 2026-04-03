@@ -511,6 +511,7 @@ code { font-size: 0.8rem; color: var(--green); background: var(--bg); padding: 0
 }
 .status-indicator.online::before { background: var(--green); box-shadow: 0 0 10px var(--green); animation: pulse-dot 2s ease-in-out infinite; }
 .status-indicator.offline::before { background: var(--red); }
+.status-indicator.error::before { background: var(--yellow); box-shadow: 0 0 10px var(--yellow); animation: pulse-dot 1.5s ease-in-out infinite; }
 
 .error { color: var(--red); font-size: 0.8rem; margin-top: 0.35rem; }
 

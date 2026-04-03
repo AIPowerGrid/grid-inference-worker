@@ -8,12 +8,15 @@
   <!-- Hero: Worker status -->
   <div class="dash-hero">
     <div class="dash-hero-left">
-      <div class="status-indicator" :class="status.worker_running ? 'online' : 'offline'">
-        <span x-text="status.worker_running ? (status.config?.worker_name || 'Online') : 'Offline'"></span>
+      <div class="status-indicator" :class="statusClass()">
+        <span x-text="statusLabel()"></span>
       </div>
       <p class="dash-model" x-show="status.config?.model_name">
         <span x-text="status.config?.grid_model_name || status.config?.model_name"></span>
       </p>
+      <template x-if="status.api_auth_error">
+        <p class="error" x-text="status.api_auth_error"></p>
+      </template>
       <template x-if="status.worker_error">
         <p class="error" x-text="status.worker_error"></p>
       </template>
@@ -184,10 +187,23 @@ function dashboard() {
     status: {
       worker_running: {{ 'true' if worker_running else 'false' }},
       worker_error: {{ worker_error | tojson }},
+      api_auth_error: null,
       config: null,
     },
     grid: { user: null, worker: null, performance: null, text_stats: null },
     restarting: false,
+
+    statusClass() {
+      if (!this.status.worker_running) return 'offline';
+      if (this.status.api_auth_error) return 'error';
+      return 'online';
+    },
+
+    statusLabel() {
+      if (!this.status.worker_running) return 'Offline';
+      if (this.status.api_auth_error) return 'Auth Error';
+      return this.status.config?.worker_name || 'Online';
+    },
 
     formatNum(n) {
       if (n == null) return '—';

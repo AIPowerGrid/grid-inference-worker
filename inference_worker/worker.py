@@ -143,6 +143,7 @@ class TextWorker:
         self.consecutive_failures = 0
         self._last_status_log = 0
         self._pop_failures = 0
+        self.api_auth_error: str | None = None
 
     def _build_grid_model_name(self) -> str:
         """Build the grid-advertised model name with domain prefix."""
@@ -260,6 +261,19 @@ class TextWorker:
         try:
             job = await self.api.pop_job([self.grid_model_name])
             self._pop_failures = 0
+            if self.api_auth_error:
+                self.api_auth_error = None
+                logger.info("API key accepted — connected to Grid.")
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 401:
+                self.api_auth_error = "Invalid API key — check your GRID_API_KEY."
+                self._pop_failures += 1
+                await asyncio.sleep(min(30, 5 * self._pop_failures))
+                return False
+            self._pop_failures += 1
+            logger.error(f"Pop error: {e}")
+            await asyncio.sleep(5)
+            return False
         except httpx.ConnectError:
             self._pop_failures += 1
             wait = min(10, 2 * self._pop_failures)

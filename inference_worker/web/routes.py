@@ -282,15 +282,18 @@ async def dashboard(request: Request):
 
 @app.get("/api/status")
 async def api_status():
-    # Grab live session stats from the worker if running
     session_stats = None
+    api_auth_error = None
     worker = worker_state.get("worker")
     if worker and hasattr(worker, "stats"):
         session_stats = worker.stats.to_dict()
+    if worker and hasattr(worker, "api_auth_error"):
+        api_auth_error = worker.api_auth_error
 
     return {
         "worker_running": worker_state["running"],
         "worker_error": worker_state.get("error"),
+        "api_auth_error": api_auth_error,
         "session_stats": session_stats,
         "config": {
             "has_api_key": bool(Settings.GRID_API_KEY),
