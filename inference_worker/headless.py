@@ -147,7 +147,7 @@ def quick_setup() -> dict:
     print()
     print("  Connection mode:")
     print("    [1] Standard — HTTP polling (compatible with all setups)")
-    print("    [2] Streaming — WebSocket + token streaming (faster, real-time)")
+    print("    [2] Streaming — WebSocket + token streaming (experimental)")
     stream_choice = input("  [1]: ").strip()
     if stream_choice == "2":
         config["GRID_STREAMING"] = "true"

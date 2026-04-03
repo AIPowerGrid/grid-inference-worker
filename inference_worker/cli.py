@@ -76,7 +76,7 @@ def main():
     parser.add_argument("--worker-name", metavar="NAME",
                         help="Worker name on the grid")
     parser.add_argument("--streaming", action="store_true",
-                        help="Enable WebSocket streaming mode (real-time token streaming)")
+                        help="Enable WebSocket streaming mode (experimental)")
     parser.add_argument("--port", type=int, default=7861, metavar="PORT",
                         help="Web dashboard port (default: 7861)")
     parser.add_argument("--install-service", action="store_true",
