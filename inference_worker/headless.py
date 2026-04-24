@@ -258,10 +258,17 @@ def run(args):
 
     from .config import Settings
     if Settings.P2P_ENABLED:
-        from .p2p_client import P2PWorker
-        worker = P2PWorker()
+        # P2P mode uses trio (not asyncio)
+        from .p2p_client import run_p2p_worker
         print("  🔗 P2P mode — libp2p gossipsub connection")
-    elif Settings.GRID_STREAMING:
+        try:
+            run_p2p_worker()
+        except KeyboardInterrupt:
+            print("\n  Shutting down...")
+        return
+
+    # Non-P2P modes use asyncio
+    if Settings.GRID_STREAMING:
         from .ws_client import StreamingWorker
         worker = StreamingWorker()
         print("  ⚡ Streaming mode — WebSocket connection")

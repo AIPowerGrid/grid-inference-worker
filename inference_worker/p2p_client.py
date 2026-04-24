@@ -3,25 +3,28 @@
 
 """P2P client for decentralized Grid workers.
 
-Replaces WebSocket connection with libp2p gossipsub. The worker:
-1. Joins the P2P mesh
-2. Subscribes to job topics for its models
-3. Claims jobs using deterministic selection
-4. Streams results back via gossipsub
+Uses libp2p gossipsub to:
+1. Join the P2P mesh
+2. Subscribe to job topics for configured model
+3. Claim jobs using deterministic selection
+4. Stream results back via gossipsub
 
 Enable with P2P_ENABLED=true in your .env.
+
+This worker runs trio directly (not asyncio) since it's standalone.
 """
 
-import asyncio
 import hashlib
 import json
 import logging
+import re
 import time
 from dataclasses import dataclass, field
 from typing import Any
 from uuid import uuid4
 
 import httpx
+import trio
 
 from .config import Settings
 
@@ -49,7 +52,6 @@ def results_topic(job_id: str) -> str:
 
 def _strip_thinking_tags(text: str) -> str:
     """Remove think-tag blocks from reasoning models."""
-    import re
     if not text:
         return text
     return re.sub(r"<think(?:ing)?>.*?</think(?:ing)?>", "", text, flags=re.DOTALL).strip()
@@ -123,30 +125,31 @@ def should_claim(job: JobRequest, my_worker_id: str, known_workers: list[str]) -
 
 
 class P2PWorker:
-    """P2P-based worker using libp2p gossipsub."""
+    """P2P-based worker using libp2p gossipsub.
+
+    Runs with trio event loop (not asyncio).
+    """
 
     def __init__(self):
         Settings.validate()
         self.model_name: str = Settings.MODEL_NAME
-        self.grid_model_name: str = Settings.GRID_MODEL_NAME or self._build_grid_model_name()
-        self.backend = httpx.AsyncClient(timeout=120)
+        self.grid_model_name: str = Settings.GRID_MODEL_NAME or f"grid/{self.model_name}"
 
         # P2P state
         self._host = None
         self._pubsub = None
+        self._gossipsub = None
         self.peer_id: str = ""
         self._known_workers: set[str] = set()
         self._claimed_jobs: dict[str, JobClaim] = {}
         self._running = False
 
+        # Subscriptions
+        self._job_subscription = None
+        self._claims_subscription = None
+
         # Stats
         self._jobs_completed = 0
-        self._total_den = 0.0
-
-    def _build_grid_model_name(self) -> str:
-        if Settings.BACKEND_TYPE == "ollama":
-            return f"grid/{self.model_name}"
-        return f"grid/{self.model_name}"
 
     def _get_completions_url(self) -> str:
         if Settings.BACKEND_TYPE == "ollama":
@@ -159,109 +162,157 @@ class P2PWorker:
             headers["Authorization"] = f"Bearer {Settings.OPENAI_API_KEY}"
         return headers
 
-    async def start(self):
-        """Start the P2P node and join the mesh."""
-        if self._running:
-            return
+    async def run(self) -> None:
+        """Main entry point - runs with trio."""
+        from libp2p import new_host
+        from libp2p.crypto.secp256k1 import create_new_key_pair
+        from libp2p.peer.peerinfo import info_from_p2p_addr
+        from libp2p.pubsub.gossipsub import GossipSub
+        from libp2p.pubsub.pubsub import Pubsub
+        from libp2p.stream_muxer.mplex.mplex import MPLEX_PROTOCOL_ID, Mplex
+        from libp2p.tools.anyio_service import background_trio_service
+        from libp2p.custom_types import TProtocol
+        from libp2p.peer.id import ID
+        import multiaddr
 
-        try:
-            from libp2p import new_host
-            from libp2p.pubsub.gossipsub import GossipSub
-            from libp2p.pubsub.pubsub import Pubsub
-            from libp2p.peer.peerinfo import info_from_p2p_addr
-            import multiaddr
-        except ImportError as e:
-            logger.error(f"libp2p not installed: {e}")
-            logger.error("Install with: pip install libp2p trio")
-            raise
-
-        listen_port = Settings.P2P_LISTEN_PORT
-        listen_addr = f"/ip4/0.0.0.0/tcp/{listen_port}"
-
-        logger.info(f"Starting P2P node on {listen_addr}...")
+        # Generate key pair
+        key_pair = create_new_key_pair()
 
         # Create host
-        self._host = new_host()
+        self._host = new_host(
+            key_pair=key_pair,
+            muxer_opt={MPLEX_PROTOCOL_ID: Mplex},
+        )
 
-        # Initialize gossipsub
-        gs = GossipSub(
+        # Create gossipsub
+        self._gossipsub = GossipSub(
+            protocols=[TProtocol("/meshsub/1.0.0")],
             degree=6,
             degree_low=4,
             degree_high=12,
             time_to_live=5,
+            heartbeat_interval=5,
         )
-        self._pubsub = Pubsub(self._host, gs)
+        self._pubsub = Pubsub(self._host, self._gossipsub)
 
-        self.peer_id = self._host.get_id().to_string()
-        self._known_workers.add(self.peer_id)
+        # Listen address
+        listen_port = Settings.P2P_LISTEN_PORT
+        listen_addrs = [f"/ip4/0.0.0.0/tcp/{listen_port}"]
 
-        # Connect to bootstrap peers
-        bootstrap_peers = Settings.P2P_BOOTSTRAP_PEERS
-        for peer_addr in bootstrap_peers:
+        async with self._host.run(listen_addrs=listen_addrs), trio.open_nursery() as nursery:
+            # Start peerstore cleanup
+            nursery.start_soon(self._host.get_peerstore().start_cleanup_task, 60)
+
+            async with background_trio_service(self._pubsub):
+                async with background_trio_service(self._gossipsub):
+                    await self._pubsub.wait_until_ready()
+
+                    # Get peer ID
+                    self.peer_id = self._host.get_id().to_string()
+                    self._known_workers.add(self.peer_id)
+                    self._running = True
+
+                    logger.info(f"🚀 P2P Worker started | model={self.grid_model_name}")
+                    logger.info(f"📡 Backend: {Settings.BACKEND_TYPE} @ {self._get_completions_url()}")
+                    logger.info(f"🔗 Peer ID: {self.peer_id}")
+                    logger.info(f"🎧 Listening on port {listen_port}")
+
+                    # Connect to bootstrap peers
+                    for peer_addr in Settings.P2P_BOOTSTRAP_PEERS:
+                        try:
+                            maddr = multiaddr.Multiaddr(peer_addr)
+                            info = info_from_p2p_addr(maddr)
+                            await self._host.connect(info)
+                            logger.info(f"✅ Connected to bootstrap peer: {info.peer_id}")
+                        except Exception as e:
+                            logger.warning(f"⚠️ Failed to connect to {peer_addr}: {e}")
+
+                    # Subscribe to job topic
+                    topic = job_topic(self.grid_model_name)
+                    self._job_subscription = await self._pubsub.subscribe(topic)
+                    logger.info(f"📥 Subscribed to {topic}")
+
+                    # Subscribe to claims topic
+                    self._claims_subscription = await self._pubsub.subscribe(claims_topic())
+                    logger.info(f"📥 Subscribed to {claims_topic()}")
+
+                    # Start message handlers
+                    nursery.start_soon(self._job_loop, ID)
+                    nursery.start_soon(self._claims_loop, ID)
+
+                    # Run until cancelled
+                    logger.info("⏳ Waiting for jobs...")
+                    await trio.sleep_forever()
+
+    async def _job_loop(self, ID) -> None:
+        """Process incoming job messages."""
+        while self._running:
             try:
-                maddr = multiaddr.Multiaddr(peer_addr)
-                info = info_from_p2p_addr(maddr)
-                await self._host.connect(info)
-                logger.info(f"Connected to bootstrap peer: {info.peer_id}")
+                message = await self._job_subscription.get()
+                from_peer = ID(message.from_id).to_base58()
+
+                # Skip our own messages
+                if from_peer == self.peer_id:
+                    continue
+
+                data = message.data.decode()
+                job = JobRequest.from_json(data)
+
+                # Skip expired
+                if job.is_expired():
+                    continue
+
+                # Skip already claimed
+                if job.id in self._claimed_jobs:
+                    claim = self._claimed_jobs[job.id]
+                    if claim.worker_id != self.peer_id:
+                        continue
+
+                # Check if we should claim
+                if not should_claim(job, self.peer_id, list(self._known_workers)):
+                    logger.debug(f"Not our turn for job {job.id[:8]}")
+                    continue
+
+                # Process the job
+                await self._handle_job(job)
+
             except Exception as e:
-                logger.warning(f"Failed to connect to {peer_addr}: {e}")
+                if "cancelled" in str(e).lower():
+                    break
+                logger.error(f"Job loop error: {e}")
+                await trio.sleep(0.1)
 
-        self._running = True
-        logger.info(f"P2P node started. Peer ID: {self.peer_id}")
+    async def _claims_loop(self, ID) -> None:
+        """Process incoming claim messages."""
+        while self._running:
+            try:
+                message = await self._claims_subscription.get()
+                from_peer = ID(message.from_id).to_base58()
 
-    async def stop(self):
-        """Stop the P2P node."""
-        self._running = False
-        await self.backend.aclose()
-        logger.info("P2P node stopped")
+                # Skip our own messages
+                if from_peer == self.peer_id:
+                    continue
 
-    async def run(self):
-        """Main worker loop."""
-        await self.start()
+                data = message.data.decode()
+                claim = JobClaim.from_json(data)
 
-        logger.info(f"🚀 P2P Worker starting | model={self.grid_model_name}")
-        logger.info(f"📡 Backend: {Settings.BACKEND_TYPE} @ {self._get_completions_url()}")
-        logger.info(f"🔗 Peer ID: {self.peer_id}")
+                # Record claim (first wins)
+                existing = self._claimed_jobs.get(claim.job_id)
+                if not existing or claim.timestamp < existing.timestamp:
+                    self._claimed_jobs[claim.job_id] = claim
+                    self._known_workers.add(claim.worker_id)
+                    logger.debug(f"Recorded claim: {claim.worker_id[:8]} -> {claim.job_id[:8]}")
 
-        # Subscribe to job topic
-        topic = job_topic(self.grid_model_name)
-        logger.info(f"📥 Subscribing to {topic}")
-
-        await self._pubsub.subscribe(topic)
-        await self._pubsub.subscribe(claims_topic())
-
-        # Process messages
-        try:
-            while self._running:
-                # In a real implementation, we'd use trio's async for
-                # For now, poll subscriptions
-                await self._process_messages(topic)
-                await asyncio.sleep(0.1)
-        finally:
-            await self.stop()
-
-    async def _process_messages(self, job_topic_name: str):
-        """Process incoming messages from subscriptions."""
-        # This is a simplified version - real impl would use trio properly
-        # For demonstration, we'll check for messages
-        pass  # In real impl, async iterate over subscription
+            except Exception as e:
+                if "cancelled" in str(e).lower():
+                    break
+                logger.error(f"Claims loop error: {e}")
+                await trio.sleep(0.1)
 
     async def _handle_job(self, job: JobRequest) -> None:
         """Process a single job."""
         job_id = job.id
         payload = job.payload
-
-        # Check if we should claim
-        if not should_claim(job, self.peer_id, list(self._known_workers)):
-            logger.debug(f"Not our turn for job {job_id[:8]}")
-            return
-
-        # Check if already claimed by someone else
-        if job_id in self._claimed_jobs:
-            claim = self._claimed_jobs[job_id]
-            if claim.worker_id != self.peer_id:
-                logger.debug(f"Job {job_id[:8]} already claimed by {claim.worker_id[:8]}")
-                return
 
         # Broadcast our claim
         claim = JobClaim(
@@ -275,9 +326,21 @@ class P2PWorker:
         await self._pubsub.publish(claims_topic(), claim.to_json().encode())
         logger.info(f"📋 Claimed job {job_id[:8]}")
 
-        # Extract prompt
-        prompt = payload.get("prompt", "")
-        max_tokens = int(payload.get("max_length", 512))
+        # Extract prompt - handle both formats
+        if "messages" in payload:
+            # OpenAI format
+            messages = payload["messages"]
+        elif "prompt" in payload:
+            # Simple format
+            messages = [
+                {"role": "system", "content": "You are a helpful assistant."},
+                {"role": "user", "content": payload["prompt"]},
+            ]
+        else:
+            logger.error(f"Unknown payload format for job {job_id[:8]}")
+            return
+
+        max_tokens = int(payload.get("max_length", payload.get("max_tokens", 512)))
         temperature = float(payload.get("temperature", 0.7))
         top_p = float(payload.get("top_p", 0.9))
 
@@ -286,10 +349,7 @@ class P2PWorker:
         # Build OpenAI-compatible request
         openai_payload = {
             "model": self.model_name,
-            "messages": [
-                {"role": "system", "content": "You are a helpful assistant."},
-                {"role": "user", "content": prompt},
-            ],
+            "messages": messages,
             "max_tokens": max_tokens,
             "temperature": temperature,
             "top_p": top_p,
@@ -304,64 +364,66 @@ class P2PWorker:
         token_count = 0
         start_time = time.time()
 
-        try:
-            async with self.backend.stream("POST", url, json=openai_payload, headers=headers) as response:
-                if response.status_code != 200:
-                    body = await response.aread()
-                    logger.error(f"Backend error {response.status_code}: {body[:200]}")
-                    await self._pubsub.publish(
-                        result_topic,
-                        json.dumps({
-                            "job_id": job_id,
-                            "worker_id": self.peer_id,
-                            "type": "error",
-                            "error": {"message": f"Backend error: {response.status_code}", "code": response.status_code},
-                        }).encode()
-                    )
-                    return
+        # Use httpx with trio backend
+        async with httpx.AsyncClient(timeout=120) as client:
+            try:
+                async with client.stream("POST", url, json=openai_payload, headers=headers) as response:
+                    if response.status_code != 200:
+                        body = await response.aread()
+                        logger.error(f"Backend error {response.status_code}: {body[:200]}")
+                        await self._pubsub.publish(
+                            result_topic,
+                            json.dumps({
+                                "job_id": job_id,
+                                "worker_id": self.peer_id,
+                                "type": "error",
+                                "error": {"message": f"Backend error: {response.status_code}", "code": response.status_code},
+                            }).encode()
+                        )
+                        return
 
-                async for line in response.aiter_lines():
-                    if not line.startswith("data: "):
-                        continue
-                    data_str = line[6:]
-                    if data_str.strip() == "[DONE]":
-                        break
+                    async for line in response.aiter_lines():
+                        if not line.startswith("data: "):
+                            continue
+                        data_str = line[6:]
+                        if data_str.strip() == "[DONE]":
+                            break
 
-                    try:
-                        chunk = json.loads(data_str)
-                        delta = chunk.get("choices", [{}])[0].get("delta", {})
-                        content = delta.get("content", "")
-                        if content:
-                            content = _strip_thinking_tags(content) if "<think" in content else content
+                        try:
+                            chunk = json.loads(data_str)
+                            delta = chunk.get("choices", [{}])[0].get("delta", {})
+                            content = delta.get("content", "")
                             if content:
-                                full_text += content
-                                token_count += 1
+                                content = _strip_thinking_tags(content) if "<think" in content else content
+                                if content:
+                                    full_text += content
+                                    token_count += 1
 
-                                # Publish token to result topic
-                                await self._pubsub.publish(
-                                    result_topic,
-                                    json.dumps({
-                                        "job_id": job_id,
-                                        "worker_id": self.peer_id,
-                                        "type": "token",
-                                        "token": {"text": content, "index": token_count},
-                                    }).encode()
-                                )
-                    except (json.JSONDecodeError, IndexError, KeyError):
-                        continue
+                                    # Publish token to result topic
+                                    await self._pubsub.publish(
+                                        result_topic,
+                                        json.dumps({
+                                            "job_id": job_id,
+                                            "worker_id": self.peer_id,
+                                            "type": "token",
+                                            "token": {"text": content, "index": token_count},
+                                        }).encode()
+                                    )
+                        except (json.JSONDecodeError, IndexError, KeyError):
+                            continue
 
-        except (httpx.ConnectError, httpx.ReadTimeout) as e:
-            logger.error(f"Backend error: {e}")
-            await self._pubsub.publish(
-                result_topic,
-                json.dumps({
-                    "job_id": job_id,
-                    "worker_id": self.peer_id,
-                    "type": "error",
-                    "error": {"message": str(e), "code": 0},
-                }).encode()
-            )
-            return
+            except (httpx.ConnectError, httpx.ReadTimeout) as e:
+                logger.error(f"Backend error: {e}")
+                await self._pubsub.publish(
+                    result_topic,
+                    json.dumps({
+                        "job_id": job_id,
+                        "worker_id": self.peer_id,
+                        "type": "error",
+                        "error": {"message": str(e), "code": 0},
+                    }).encode()
+                )
+                return
 
         # Publish completion
         gen_time = time.time() - start_time
@@ -383,19 +445,38 @@ class P2PWorker:
         tps = token_count / gen_time if gen_time > 0 else 0
         logger.info(
             f"✅ {job_id[:8]} | {token_count} tokens | {gen_time:.1f}s | "
-            f"{tps:.1f} TPS | total jobs: {self._jobs_completed}"
+            f"{tps:.1f} TPS | total: {self._jobs_completed}"
         )
 
-    async def _handle_claim(self, claim: JobClaim) -> None:
-        """Handle incoming claim from another worker."""
-        existing = self._claimed_jobs.get(claim.job_id)
-        if not existing or claim.timestamp < existing.timestamp:
-            self._claimed_jobs[claim.job_id] = claim
-            self._known_workers.add(claim.worker_id)
-            logger.debug(f"Recorded claim: {claim.worker_id[:8]} -> {claim.job_id[:8]}")
+        # Cleanup old claims periodically
+        if self._jobs_completed % 10 == 0:
+            self._cleanup_claims()
+
+    def _cleanup_claims(self) -> None:
+        """Remove old claims to prevent memory leak."""
+        now = time.time()
+        ttl = 120  # Keep claims for 2 minutes
+
+        expired = [
+            job_id for job_id, claim in self._claimed_jobs.items()
+            if now - claim.timestamp > ttl
+        ]
+        for job_id in expired:
+            del self._claimed_jobs[job_id]
+
+        if expired:
+            logger.debug(f"Cleaned up {len(expired)} old claims")
+
+    async def stop(self) -> None:
+        """Stop the worker."""
+        self._running = False
+        logger.info("P2P worker stopped")
 
 
-async def run_p2p_worker():
+def run_p2p_worker() -> None:
     """Entry point for P2P worker mode."""
     worker = P2PWorker()
-    await worker.run()
+    try:
+        trio.run(worker.run)
+    except KeyboardInterrupt:
+        logger.info("Shutting down...")
