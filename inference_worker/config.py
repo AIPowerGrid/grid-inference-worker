@@ -63,6 +63,15 @@ class Settings:
     GRID_STREAMING = os.getenv("GRID_STREAMING", "false").lower() == "true"
     GRID_STREAMING_URL = os.getenv("GRID_STREAMING_URL", "")  # Override WS URL (auto-derived from GRID_API_URL if empty)
 
+    # P2P mode — connect via libp2p gossipsub instead of WebSocket
+    P2P_ENABLED = os.getenv("P2P_ENABLED", "false").lower() == "true"
+    P2P_LISTEN_PORT = int(os.getenv("P2P_LISTEN_PORT", "4001"))
+    P2P_BOOTSTRAP_PEERS: list[str] = [
+        p.strip()
+        for p in os.getenv("P2P_BOOTSTRAP_PEERS", "").split(",")
+        if p.strip()
+    ]
+
     # Wallet address for rewards (Base chain)
     WALLET_ADDRESS = os.getenv("WALLET_ADDRESS", "")
 

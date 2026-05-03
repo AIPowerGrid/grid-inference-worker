@@ -257,6 +257,17 @@ def run(args):
     print()
 
     from .config import Settings
+    if Settings.P2P_ENABLED:
+        # P2P mode uses trio (not asyncio)
+        from .p2p_client import run_p2p_worker
+        print("  🔗 P2P mode — libp2p gossipsub connection")
+        try:
+            run_p2p_worker()
+        except KeyboardInterrupt:
+            print("\n  Shutting down...")
+        return
+
+    # Non-P2P modes use asyncio
     if Settings.GRID_STREAMING:
         from .ws_client import StreamingWorker
         worker = StreamingWorker()
@@ -271,7 +282,12 @@ def run(args):
         except asyncio.CancelledError:
             pass
         finally:
-            await worker.cleanup()
+            if hasattr(worker, 'cleanup'):
+                await worker.cleanup()
+            elif hasattr(worker, 'stop'):
+                await worker.stop()
+            elif hasattr(worker, 'close'):
+                await worker.close()
 
     try:
         asyncio.run(_run())
