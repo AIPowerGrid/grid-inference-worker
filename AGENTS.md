@@ -32,7 +32,7 @@ concrete detail in children. Delete stale notes instead of explaining history.
 
 ---
 
-# grid-inference-worker — turn-key text inference worker
+# grid-text-worker — turn-key text inference worker
 
 ## Purpose
 
@@ -72,7 +72,7 @@ result. Ships as a single PyInstaller binary with a browser setup wizard + dashb
 ## Verification
 
 - `pip install -e ".[test]"` then `pytest` (smoke tests under `tests/`).
-- `grid-inference-worker --no-gui` should boot the dashboard at `http://localhost:7861`.
+- `grid-text-worker --no-gui` should boot the dashboard at `http://localhost:7861`.
 
 ## Child DOX Index
 

@@ -44,7 +44,7 @@ launcher (CLI/GUI), backend detection, config, and cross-platform service instal
 ## Verification
 
 - `pytest` from repo root (smoke tests).
-- Manual: point at a local Ollama, run `grid-inference-worker`, confirm jobs complete in the dashboard.
+- Manual: point at a local Ollama, run `grid-text-worker`, confirm jobs complete in the dashboard.
 
 ## Child DOX Index
 

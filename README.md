@@ -6,20 +6,20 @@ Turn-key text inference worker for [AI Power Grid](https://aipowergrid.io). Run 
 
 ## Download
 
-Grab the latest binary for your platform from [Releases](https://github.com/AIPowerGrid/grid-inference-worker/releases):
+Grab the latest binary for your platform from [Releases](https://github.com/AIPowerGrid/grid-text-worker/releases):
 
 | Platform | File |
 |----------|------|
-| Windows x64 | `grid-inference-worker-windows-x64.exe` |
-| macOS ARM64 | `grid-inference-worker-macos-arm64.zip` |
-| Linux x64 | `grid-inference-worker-linux-x64` |
-| Linux ARM64 | `grid-inference-worker-linux-arm64` |
+| Windows x64 | `grid-text-worker-windows-x64.exe` |
+| macOS ARM64 | `grid-text-worker-macos-arm64.zip` |
+| Linux x64 | `grid-text-worker-linux-x64` |
+| Linux ARM64 | `grid-text-worker-linux-arm64` |
 
 **Windows** — Double-click the exe. A setup wizard opens in your browser at `http://localhost:7861`.
 
 **macOS** — Unzip, then open `Grid Inference Worker.app`.
 
-**Linux** — `chmod +x grid-inference-worker-linux-x64 && ./grid-inference-worker-linux-x64`
+**Linux** — `chmod +x grid-text-worker-linux-x64 && ./grid-text-worker-linux-x64`
 
 No Python or dependencies needed. Just install a backend (Ollama is easiest), run the worker, and follow the wizard.
 
@@ -32,7 +32,7 @@ Once your worker is running, chat with your model at [aipg.chat](https://aipg.ch
 Override config from the command line. The web dashboard is always available at `http://localhost:7861` regardless of how you start the worker.
 
 ```bash
-grid-inference-worker \
+grid-text-worker \
   --model llama3.2:3b \
   --backend-url http://127.0.0.1:11434 \
   --api-key YOUR_API_KEY \
@@ -76,7 +76,7 @@ Requires Python 3.9+.
 
 ```bash
 pip install -e .
-grid-inference-worker
+grid-text-worker
 ```
 
 On Windows you can also use:
@@ -101,13 +101,13 @@ Run the worker on boot without needing to stay logged in. Works on Windows (star
 
 ```bash
 # Configure the worker first (run it once to set up .env), then:
-grid-inference-worker --install-service
+grid-text-worker --install-service
 
 # Check status
-grid-inference-worker --service-status
+grid-text-worker --service-status
 
 # Remove
-grid-inference-worker --uninstall-service
+grid-text-worker --uninstall-service
 ```
 
 ## Supported Backends

@@ -33,7 +33,7 @@ settings, worker start/stop/restart). FastAPI app that owns and supervises the w
 
 ## Verification
 
-- Boot `grid-inference-worker --no-gui`; open the printed `?token=` URL; complete the wizard
+- Boot `grid-text-worker --no-gui`; open the printed `?token=` URL; complete the wizard
   against a local backend and confirm the dashboard shows the worker running.
 
 ## Child DOX Index

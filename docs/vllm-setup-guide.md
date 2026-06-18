@@ -179,7 +179,7 @@ python -m vllm.entrypoints.openai.api_server \
 
 ```bash
 # In terminal 2: Start grid worker
-grid-inference-worker
+grid-text-worker
 ```
 
 ### Verify Connection
