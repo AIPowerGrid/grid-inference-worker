@@ -10,7 +10,10 @@ requires-python = ">=3.9"
 dependencies = [
     "httpx",
     "python-dotenv",
-    "fastapi>=0.100.0",
+    # fastapi>=0.110 bundles starlette>=0.36, which has the modern
+    # TemplateResponse(request, name, context) signature the dashboard uses. The old
+    # >=0.100 floor allowed a starlette where that call broke on fresh installs (issue #2).
+    "fastapi>=0.110.0",
     "uvicorn[standard]>=0.20.0",
     "jinja2>=3.1.0",
     "websockets>=13.0",
