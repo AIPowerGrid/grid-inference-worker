@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "grid-inference-worker"
-version = "0.2.1"
+version = "0.2.2"
 description = "Turn-key text inference worker for AI Power Grid (Ollama backend)"
 requires-python = ">=3.9"
 dependencies = [
@@ -17,6 +17,10 @@ dependencies = [
     "uvicorn[standard]>=0.20.0",
     "jinja2>=3.1.0",
     "websockets>=13.0",
+    # Required by Starlette to parse the dashboard login POST (request.form()).
+    # Without it the web UI 500s on login with "python-multipart must be
+    # installed to use form parsing" (issue #3).
+    "python-multipart>=0.0.9",
 ]
 
 [project.optional-dependencies]

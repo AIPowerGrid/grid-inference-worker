@@ -26,6 +26,10 @@ a = Analysis(
         'uvicorn.protocols.websockets.auto',
         'uvicorn.lifespan.on',
         'uvicorn.lifespan.off',
+        # Starlette imports python-multipart lazily for request.form(); name it
+        # explicitly so PyInstaller bundles it into the frozen build (issue #3).
+        'multipart',
+        'python_multipart',
     ],
     hookspath=[],
     hooksconfig={},
