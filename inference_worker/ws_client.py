@@ -178,28 +178,51 @@ class StreamingWorker:
         return self._endpoint_url("chat/completions")
 
     async def _probe_formats(self) -> list:
-        """Detect which API formats the backend natively serves.
+        """Detect which API formats the backend can ACTUALLY serve by sending a
+        minimal valid request in each shape and keeping only those that return a
+        usable 200.
 
-        The grid routes /v1/messages and /v1/responses only to workers whose
-        engine actually exposes them — so we probe each candidate endpoint and
-        advertise only what answers. A 404 means the route doesn't exist (e.g.
-        vLLM has no /v1/messages); any other status means it's there. We always
-        keep openai-chat (our primary generation path)."""
-        formats = ["openai-chat"]
-        for fmt in ("openai-responses", "anthropic"):
+        The old check advertised any non-404 — but vLLM route-REJECTS unknown
+        shapes with 400 (e.g. /v1/messages), so the grid would route Anthropic /
+        Responses traffic to a worker that can't serve it. We now require a real
+        200, per format, so a broken-for-one-shape backend drops just that shape.
+        openai-chat is the primary path: this doubles as a generation pre-flight
+        (200 + actual output) — connect() refuses to register without it, so a
+        backend that can't produce tokens never advertises a model."""
+        model = self.spec.model_name
+        bodies = {
+            "openai-chat": {"model": model, "messages": [{"role": "user", "content": "hi"}],
+                            "max_tokens": 8, "stream": False},
+            "openai-responses": {"model": model, "input": "hi", "max_output_tokens": 8},
+            "anthropic": {"model": model, "messages": [{"role": "user", "content": "hi"}],
+                          "max_tokens": 8},
+        }
+        formats = []
+        for fmt in ("openai-chat", "openai-responses", "anthropic"):
             suffix = FORMAT_SUFFIX[fmt]
             try:
                 r = await self.backend.post(
-                    self._endpoint_url(suffix), json={}, headers=self._get_auth_headers(), timeout=5
+                    self._endpoint_url(suffix), json=bodies[fmt],
+                    headers=self._get_auth_headers(), timeout=30,
                 )
             except (httpx.ConnectError, httpx.ReadTimeout, httpx.HTTPError) as e:
                 logger.info(f"Backend does not serve {fmt} ({suffix}): {type(e).__name__}")
                 continue
-            if r.status_code != 404:
-                formats.append(fmt)
-                logger.info(f"Backend serves {fmt} via /{suffix} (probe HTTP {r.status_code})")
-            else:
-                logger.info(f"Backend has no {fmt} endpoint (/{suffix} -> 404)")
+            if r.status_code != 200:
+                logger.info(f"Backend does NOT serve {fmt} (/{suffix} -> HTTP {r.status_code})")
+                continue
+            if fmt == "openai-chat":
+                try:
+                    msg = (r.json().get("choices") or [{}])[0].get("message") or {}
+                    produced = bool(msg.get("content") or msg.get("reasoning_content")
+                                    or msg.get("reasoning") or msg.get("tool_calls"))
+                except Exception:
+                    produced = False
+                if not produced:
+                    logger.warning("Backend openai-chat probe returned 200 but no output — not advertising")
+                    continue
+            formats.append(fmt)
+            logger.info(f"Backend serves {fmt} via /{suffix} (200)")
         return formats
 
     def _get_auth_headers(self) -> dict:
@@ -278,6 +301,11 @@ class StreamingWorker:
         # Detect which API formats the backend exposes so the grid can route
         # /v1/messages and /v1/responses to us only if we can actually serve them.
         self.api_formats = await self._probe_formats()
+        if "openai-chat" not in self.api_formats:
+            raise BackendUnavailable(
+                f"Backend at {self.spec.url} failed the openai-chat generation "
+                "probe — not registering (would only produce job failures)"
+            )
 
         # Advertise the backend's REAL context window (auto-detected per model)
         # instead of a static env guess, so the grid + clients know each model's
@@ -535,6 +563,13 @@ class StreamingWorker:
                     # Relay the RAW delta untouched, but only if it carries
                     # something meaningful — skip the bare {"role":"assistant"}
                     # opener (the grid emits its own single role chunk).
+                    # Some vLLM reasoning parsers stream the field as `reasoning`
+                    # rather than the `reasoning_content` convention — normalize so
+                    # the meaningful-check, accumulation, and downstream all see one
+                    # name (else reasoning-only models look like 0-token failures).
+                    if delta.get("reasoning") and not delta.get("reasoning_content"):
+                        delta["reasoning_content"] = delta.pop("reasoning")
+
                     meaningful = any(
                         delta.get(k) for k in ("content", "reasoning_content", "tool_calls", "refusal")
                     )
