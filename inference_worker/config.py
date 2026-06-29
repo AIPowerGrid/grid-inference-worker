@@ -147,6 +147,7 @@ class Backend:
     concurrency: int = 1
     schedule: str = ""    # optional per-backend GRID_SCHEDULE JSON
     modalities: list[str] = field(default_factory=lambda: ["text"])  # input modalities advertised to the grid
+    modalities_declared: bool = False  # True if the operator set modalities/vision explicitly (skip auto-detect)
 
 
 def _slug(s: str) -> str:
@@ -204,6 +205,7 @@ def load_backends() -> list[Backend]:
                 concurrency=int(s.get("concurrency", 1)),
                 schedule=s.get("schedule", ""),
                 modalities=_parse_modalities(s),
+                modalities_declared=("modalities" in s or "vision" in s),
             ))
         if out:
             return out

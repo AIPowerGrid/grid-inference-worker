@@ -19,6 +19,7 @@ from datetime import datetime
 import httpx
 import websockets
 
+from . import vision_probe
 from .config import Settings
 
 logger = logging.getLogger(__name__)
@@ -135,10 +136,12 @@ class StreamingWorker:
         self.ws = None
         self.worker_id = None
         self.api_formats = ["openai-chat"]
-        # Input modalities the operator declared for this backend's model
-        # (default text-only). Advertised at registration so the grid can mark
-        # the model image-capable and the chat UI enables image upload.
+        # Input modalities advertised at registration so the grid can mark the
+        # model image-capable and the chat UI enables image upload. Either the
+        # operator declared them, or we auto-detect at connect() (see
+        # _detect_vision). Default text-only until then.
         self.modalities: list[str] = list(getattr(spec, "modalities", None) or ["text"])
+        self.modalities_declared: bool = bool(getattr(spec, "modalities_declared", False))
         self._signer = get_signer()
         self.signer_address = self._signer.address if self._signer else ""
         self._reconnect_delay = 1
@@ -316,6 +319,14 @@ class StreamingWorker:
         # true limit. Falls back to the configured default if detection fails.
         self.max_context = await self._detect_context()
 
+        # Auto-detect image input unless the operator declared modalities/vision.
+        # Reliable across engines (ollama capabilities + nonce-image probe); see
+        # _detect_vision. Declaration always wins.
+        if not self.modalities_declared:
+            self.modalities = (
+                ["text", "image"] if await self._detect_vision() else ["text"]
+            )
+
         logger.info(
             f"Connecting to {self.ws_url}... (formats: {self.api_formats}, "
             f"ctx={self.max_context})"
@@ -431,6 +442,70 @@ class StreamingWorker:
             }))
         except Exception:
             pass  # WS may already be gone; the grid's disconnect path requeues anyway
+
+    async def _detect_vision(self) -> bool:
+        """Return True if this backend's model accepts image input.
+
+        Two reliable signals (validated against moondream + text models):
+          * ollama: GET /api/show -> capabilities includes "vision" (authoritative,
+            free, no inference).
+          * everything else (vLLM/sglang/llama.cpp): a nonce-in-image probe. A
+            blind text model can't reproduce a random nonce it never saw, so
+            reading >=3/4 digits proves genuine image input. vLLM silently
+            200s/ignores and ollama text models 400-reject — neither produces the
+            nonce, so both read as text-only with ~0 false positives.
+        Any error -> text-only (fail safe: never falsely claim vision).
+        """
+        try:
+            if self.spec.backend_type == "ollama":
+                base = self.spec.url.rstrip("/")
+                if base.endswith("/v1"):
+                    base = base[:-3].rstrip("/")  # /api/show lives at the host root
+                r = await self.backend.post(
+                    f"{base}/api/show", json={"model": self.model_name}
+                )
+                if r.status_code == 200:
+                    vision = "vision" in (r.json().get("capabilities") or [])
+                    logger.info(
+                        f"🔎 vision detect (ollama caps) {self.grid_model_name}: {vision}"
+                    )
+                    return vision
+                # /api/show unavailable — fall through to the universal probe.
+
+            nonce = vision_probe.make_nonce()
+            payload = {
+                "model": self.model_name,
+                "max_tokens": 200,
+                "temperature": 0,
+                "messages": [{"role": "user", "content": [
+                    {"type": "text", "text": "Reply with EXACTLY the 4 digits in the image, or NO_IMAGE if you received no image."},
+                    {"type": "image_url", "image_url": {"url": "data:image/png;base64," + vision_probe.render_nonce_png_b64(nonce)}},
+                ]}],
+            }
+            resp = await self.backend.post(
+                self._get_completions_url(), json=payload, headers=self._get_auth_headers()
+            )
+            if resp.status_code != 200:
+                logger.info(
+                    f"🔎 vision detect (probe) {self.grid_model_name}: text-only "
+                    f"(HTTP {resp.status_code})"
+                )
+                return False
+            msg = (resp.json().get("choices") or [{}])[0].get("message", {})
+            answer = (msg.get("content") or "") + " " + (msg.get("reasoning_content") or "")
+            match = vision_probe.nonce_match(answer, nonce)
+            vision = match >= 3
+            logger.info(
+                f"🔎 vision detect (nonce probe) {self.grid_model_name}: "
+                f"{'VISION' if vision else 'text-only'} ({match}/{len(nonce)})"
+            )
+            return vision
+        except Exception as e:
+            logger.info(
+                f"🔎 vision detect {self.grid_model_name} failed "
+                f"({type(e).__name__}); assuming text-only"
+            )
+            return False
 
     def _build_backend_request(self, job_id: str, payload: dict) -> tuple[dict, bool]:
         """Build the OpenAI request we send to the local backend.
