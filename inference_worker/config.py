@@ -100,6 +100,15 @@ class Settings:
     # Grid model name (what to advertise to the grid, with domain prefix)
     GRID_MODEL_NAME = os.getenv("GRID_MODEL_NAME", "")
 
+    # Input modalities override (single-backend env config). Set this when your
+    # model is multimodal but auto-detection didn't catch it:
+    #   GRID_MODALITIES=text,image   (explicit list), or
+    #   GRID_VISION=true             (shorthand for text+image)
+    # Leave both empty to keep auto-detecting. For the GRID_BACKENDS JSON config,
+    # use the per-backend "modalities"/"vision" keys instead.
+    MODALITIES = os.getenv("GRID_MODALITIES", "").strip()
+    VISION = os.getenv("GRID_VISION", "").lower() in ("1", "true", "yes", "on")
+
     # Streaming (WebSocket /v1) is the only live mode — the legacy /v2 poll
     # queue is retired. Defaults ON; set "false" only knowingly (the worker
     # refuses rather than poll the dead /v2 endpoint).
@@ -210,6 +219,7 @@ def load_backends() -> list[Backend]:
         if out:
             return out
     # Back-compat: a single backend from the classic env vars.
+    _env_mods = [m.strip() for m in Settings.MODALITIES.split(",") if m.strip()]
     return [Backend(
         name=Settings.GRID_WORKER_NAME,
         backend_type=Settings.BACKEND_TYPE,
@@ -219,4 +229,8 @@ def load_backends() -> list[Backend]:
         grid_model_name=Settings.GRID_MODEL_NAME or f"grid/{Settings.MODEL_NAME}",
         concurrency=Settings.MAX_THREADS,
         schedule=Settings.GRID_SCHEDULE,
+        # Honor GRID_MODALITIES / GRID_VISION as an explicit override; otherwise
+        # default to text-only and let connect() auto-detect.
+        modalities=_parse_modalities({"modalities": _env_mods, "vision": Settings.VISION}),
+        modalities_declared=bool(_env_mods or Settings.VISION),
     )]
